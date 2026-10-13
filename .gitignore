@@ -15,10 +15,9 @@ crash.log
 tools/node_modules/
 node_modules/
 
-# ---------- 原始素材包（52.7 MB）----------
-# 已处理为 drumbeat-m0/assets/ 的成品素材，原始包不入库。
-# 需要一起入库时，删掉下面这一行再 git add picture 即可。
-picture/
+# ---------- 原始素材包（约 52.7 MB）----------
+# 原始 AI 素材包（品红底，需处理），与 drumbeat-m0/assets/ 的成品并存，
+# 便于队友重新抠图/分帧；处理规则见 README「美术素材 → 抠图规则」。
 
 # ---------- Trae 内部产物 ----------
 .trae-html-share-packages/
