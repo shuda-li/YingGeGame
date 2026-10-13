@@ -103,6 +103,9 @@ def main() -> int:
                 pygame.image.save(g.screen, path)
             saved += 1
         if g.state in ("dead", "cleared"):
+            g.show_debug = False
+            g.show_feel = False
+            g._render(t)
             pygame.image.save(g.screen, os.path.join(out_dir, f"state_{g.state}.png"))
             break
 

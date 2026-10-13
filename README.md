@@ -6,6 +6,20 @@
 
 ---
 
+## 画面预览
+
+实际运行截图（由 `drumbeat-m0/tools/preview.py` 无窗口渲染生成）：
+
+![起始赛段](screenshots/01_start.png)
+
+![中段战斗](screenshots/02_combat.png)
+
+![收阵结算](screenshots/03_cleared.png)
+
+> 画面仍在迭代中：背景层目前是横向平铺，接缝处可见重复；`远景层` 素材尚未启用。
+
+---
+
 ## 一、项目简介
 
 玩家扮演英歌队的槌手，踩着锣鼓鼓点一路巡游、挥槌破阵。游戏把「英歌舞的节奏感」翻译成可上手的操作：踩准判定点出招，伤害倍率更高；踩不准仍保留音效与判定反馈，但空挥不给伤害。
@@ -52,6 +66,7 @@ TRAE_WORK_data_YingGe/
 │  └─ tools/
 │     ├─ smoke_test.py         无窗口冒烟测试（核心链路 + 面板自检）
 │     └─ preview.py            渲染预览：无窗口跑一段并存 PNG，便于验收美术与镜头
+├─ screenshots/                 画面预览截图（README 展示用，可由 preview.py 重新生成）
 ├─ picture/                     原始素材包（AI 生成，品红底）
 ├─ tools/                       文档工具（Markdown → DOCX）
 │  ├─ package.json              依赖声明（docx）
