@@ -1,0 +1,33 @@
+# ---------- 构建与运行产物 ----------
+drumbeat-m0/build/
+drumbeat-m0/dist/
+drumbeat-m0/preview_out/
+**/__pycache__/
+*.pyc
+*.pyo
+crash.log
+
+# ---------- 试玩数据 ----------
+**/playtest_log.csv
+**/playtest_summary.csv
+
+# ---------- 依赖 ----------
+tools/node_modules/
+node_modules/
+
+# ---------- 原始素材包（52.7 MB）----------
+# 已处理为 drumbeat-m0/assets/ 的成品素材，原始包不入库。
+# 需要一起入库时，删掉下面这一行再 git add picture 即可。
+picture/
+
+# ---------- Trae 内部产物 ----------
+.trae-html-share-packages/
+
+# ---------- 原稿备份 ----------
+*_原稿备份.docx
+
+# ---------- 编辑器 / 系统 ----------
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
