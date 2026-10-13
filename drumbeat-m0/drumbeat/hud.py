@@ -5,6 +5,8 @@ M1 改造：M1-2 接入像素素材（缺图回退程序绘制）、M1-4 接入�
 """
 from __future__ import annotations
 
+import math
+
 import pygame
 
 from .assets import Assets
@@ -150,14 +152,22 @@ class Renderer:
         return rec
 
     def _blit_layer(self, surf: pygame.Surface, rec) -> None:
+        """按视差滚动绘制背景层。
+
+        相邻瓦片左右镜像拼接：拼接处两列像素来自同一图像数据，内容连续，因此看不出接缝。
+        镜像奇偶用「世界锚定的瓦片序号」判断，保证镜头移动时不会突然翻转。
+        """
         if rec is None:
             return
         tile, y, factor, step = rec
         if tile.get_width() < 1:
             return
-        x = int((-self.cam.x * PIXELS_PER_UNIT * factor) % step) - step
+        flip = self.assets.flipped(tile)
+        off = self.cam.x * PIXELS_PER_UNIT * factor      # 该层对应的世界坐标偏移
+        x = int((-off) % step) - step
         while x < SCREEN_W:
-            surf.blit(tile, (x, y))
+            k = math.floor((off + x) / step)
+            surf.blit(flip if k % 2 else tile, (x, y))
             x += step
 
     def _draw_tiled_solids(self, surf: pygame.Surface, rects) -> None:
