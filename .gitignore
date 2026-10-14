@@ -30,3 +30,7 @@ node_modules/
 .idea/
 Thumbs.db
 Desktop.ini
+
+# Office 临时文件（Word 打开 docx 时生成的锁文件等）
+~$*
+*.tmp
