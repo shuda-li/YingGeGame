@@ -232,6 +232,11 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 ## 九、常见问题
 
+- **运行报 `ModuleNotFoundError: No module named 'pygame'`？** 说明 `python` 解析到的环境没装 pygame（本机就是这种情况：`python` 命令指向未装依赖的环境，只有 `C:\Pychram\Python云烟\python.exe` 装了）。两种解法：
+  1. **双击 `drumbeat-m0/run.bat`** —— 会自动挑选能 `import pygame` 的解释器再启动，最省事；
+  2. 或手动用完整路径运行：`"C:\Pychram\Python云烟\python.exe" run.py`。
+
+  根本解法是给常用环境装上依赖：`python -m pip install pygame numpy sounddevice pyinstaller`。
 - **没有声音？** 音频设备不可用时会自动降级为 `NullAudioEngine`（判定仍可跑通，仅无声音）。若打包后无声，见第三节的「打包注意」。
 - **想快速自动跑一遍？** 设置环境变量 `DRUMBEAT_SMOKE_FRAMES=600`，游戏会跑 600 帧后自动退出并导出日志。
 - **试玩数据在哪？** 退出后在 exe / 工程目录生成 `playtest_log.csv`（逐条判定）与 `playtest_summary.csv`（判定分布、Δt 均值、音频引擎状态）。
