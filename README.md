@@ -246,7 +246,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 - 游戏策划案（DOCX 版）：`docs/策划案/project-drumbeat-game-design-proposal.docx`
 - 游戏策划案（结构化数据版）：`docs/策划案/project-drumbeat-game-design-proposal.json`
 - 豆包像素素材提示词套件：`docs/策划案/project-drumbeat-doubao-pixel-prompt-kit.md`
-- 第 8 小组课程策划案：`潮汕英歌舞非遗数字化传承与创新实践_第8小组策划案(1).docx`
+- 第 8 小组课程策划案：`docs/策划案/潮汕英歌舞非遗数字化传承与创新实践_第8小组策划案(1).docx`
 - 详细设计文档：`docs/设计文档/project-drumbeat-detailed-design-document.json`
 - 合拍判定与节拍表：`docs/设计文档/project-drumbeat-beat-judgement-tables.json`
 - 判定锚点与 BPM 决策记录：`docs/设计文档/project-drumbeat-decision-ADR-001.json`
