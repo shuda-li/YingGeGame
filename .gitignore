@@ -23,7 +23,7 @@ node_modules/
 .trae-html-share-packages/
 
 # ---------- 原稿备份 ----------
-*_原稿备份.docx
+*原稿备份*.docx
 
 # ---------- 编辑器 / 系统 ----------
 .vscode/

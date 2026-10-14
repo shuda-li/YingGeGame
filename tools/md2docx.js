@@ -6,7 +6,7 @@
 //   npm run docx -- <输入.md> <输出.docx>
 //
 // 例：
-//   npm run docx -- ../project-drumbeat-game-design-proposal.md ../project-drumbeat-game-design-proposal.docx
+//   npm run docx -- ../docs/策划案/project-drumbeat-game-design-proposal.md ../docs/策划案/project-drumbeat-game-design-proposal.docx
 //
 // 说明：正文中文用 Microsoft YaHei；若本机无该字体，Word 会自动回退到其他中文字体。
 const fs = require("fs");

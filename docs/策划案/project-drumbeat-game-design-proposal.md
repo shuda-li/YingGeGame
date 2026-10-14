@@ -33,7 +33,7 @@
 
 **风格**：像素风（16-bit 取向），角色为清晰像素块 + 硬边描边，背景为像素化中式建筑群 + 视差层。
 
-**素材来源**：`picture/` 图片包，由豆包 Seedream 生成，提示词见《豆包像素素材提示词套件》。
+**素材来源**：`art-source/picture/` 图片包，由豆包 Seedream 生成，提示词见《豆包像素素材提示词套件》。
 
 **抠图规则**
 - 底色为品红 `#FF00FF`（部分经 JPEG 压缩后偏玫红 `#E00060`）
@@ -104,7 +104,7 @@
 
 ## 五、素材现状与缺口
 
-**已有**（`picture/` 已处理为 `drumbeat-m0/assets/`，清单见 `assets/manifest.json`）
+**已有**（`art-source/picture/` 已处理为 `drumbeat-m0/assets/`，清单见 `assets/manifest.json`）
 
 - 玩家：run_0..3（跑动 4 帧）、charge（蓄力）、jump（跳跃）、death（阵亡）
 - 敌人：idle、walk、attack1、attack2、block、defeat_0..2
@@ -167,7 +167,7 @@ drumbeat-m0/tools/smoke_test.py  无窗口冒烟测试
 **目标**：把像素素材替换掉现有色块占位，画面统一为像素风。
 
 - **M1-1 素材落位**（已完成）
-  - 做法：`picture/` → `drumbeat-m0/assets/`（抠图、分帧、统一整数倍缩放），清单见 `assets/manifest.json`
+  - 做法：`art-source/picture/` → `drumbeat-m0/assets/`（抠图、分帧、统一整数倍缩放），清单见 `assets/manifest.json`
   - 验收：预览图中角色完整、无品红残留、比例一致
 - **M1-2 写贴图加载层**
   - 做法：让 AI 在 `hud.py` 加「贴图加载 + 缺图回退色块」：按 assets 命名自动加载，缺图回退程序绘制

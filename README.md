@@ -10,11 +10,11 @@
 
 实际运行截图（由 `drumbeat-m0/tools/preview.py` 无窗口渲染生成）：
 
-![起始赛段](screenshots/01_start.png)
+![起始赛段](docs/screenshots/01_start.png)
 
-![中段战斗](screenshots/02_combat.png)
+![中段战斗](docs/screenshots/02_combat.png)
 
-![收阵结算](screenshots/03_cleared.png)
+![收阵结算](docs/screenshots/03_cleared.png)
 
 > 画面仍在迭代中：背景层采用镜像拼接已消除平铺接缝，但会有对称重复感；`远景层` 素材尚未启用。
 
@@ -66,20 +66,16 @@ TRAE_WORK_data_YingGe/
 │  └─ tools/
 │     ├─ smoke_test.py         无窗口冒烟测试（核心链路 + 面板自检）
 │     └─ preview.py            渲染预览：无窗口跑一段并存 PNG，便于验收美术与镜头
-├─ screenshots/                 画面预览截图（README 展示用，可由 preview.py 重新生成）
-├─ picture/                     原始素材包（AI 生成，品红底）
+├─ docs/                        全部文档
+│  ├─ 策划案/                    游戏策划案（md / json / docx）、豆包像素提示词套件、第 8 小组策划案
+│  ├─ 设计文档/                  详细设计文档、合拍判定与节拍表、ADR-001、英歌融合方案、早期玩法设计
+│  ├─ 进度与验收/                项目进度.md、M0 任务清单、M0 开发状态、美术素材需求清单
+│  └─ screenshots/              画面预览截图（README 展示用，可由 preview.py 重新生成）
+├─ art-source/picture/          原始素材包（AI 生成，品红底）
+├─ archive/                     历史归档（初版横版跑酷策划案、原稿备份）
 ├─ tools/                       文档工具（Markdown → DOCX）
 │  ├─ package.json              依赖声明（docx）
 │  └─ md2docx.js                转换脚本
-├─ project-drumbeat-game-design-proposal.json   游戏策划案（结构化数据版）
-├─ project-drumbeat-game-design-proposal.md     游戏策划案（可读版）
-├─ project-drumbeat-doubao-pixel-prompt-kit.md  豆包像素素材提示词套件
-├─ project-drumbeat-detailed-design-document.json   详细设计文档
-├─ project-drumbeat-beat-judgement-tables.json      合拍判定与节拍表
-├─ project-drumbeat-decision-ADR-001.json           判定锚点与 BPM 决策记录
-├─ project-drumbeat-m0-prototype-tasklist.json      M0 任务清单
-├─ project-drumbeat-m0-build-status.json            M0 开发状态与验证结果
-└─ project-drumbeat-art-asset-manifest.json         美术素材需求清单
 ```
 
 ---
@@ -168,7 +164,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ### 1. 风格规范
 
 - **像素风**（16-bit 取向）：清晰像素块 + 硬边描边，无抗锯齿、无模糊
-- 角色与背景均来自 AI 生成（豆包 Seedream），提示词见 `project-drumbeat-doubao-pixel-prompt-kit.md`
+- 角色与背景均来自 AI 生成（豆包 Seedream），提示词见 `docs/策划案/project-drumbeat-doubao-pixel-prompt-kit.md`
 - 调色板锁定 24–32 色，主色：英歌红 `#D11430`、粉白 `#FBEFF3`、金 `#D4A017`、夜蓝 `#12203A`、青绿 `#2E7D6B`
 - 渲染尺度建议：`PIXELS_PER_UNIT = 80`，屏幕 1280×720，可见世界 16×9 单位，角色高约 **149px**
 
@@ -245,14 +241,18 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 ## 十、相关文档
 
-- 游戏策划案（可读版）：`project-drumbeat-game-design-proposal.md`
-- 游戏策划案（DOCX 版）：`project-drumbeat-game-design-proposal.docx`
-- 游戏策划案（结构化数据版）：`project-drumbeat-game-design-proposal.json`
-- 豆包像素素材提示词套件：`project-drumbeat-doubao-pixel-prompt-kit.md`
-- 详细设计文档：`project-drumbeat-detailed-design-document.json`
-- 合拍判定与节拍表：`project-drumbeat-beat-judgement-tables.json`
-- 判定锚点与 BPM 决策记录：`project-drumbeat-decision-ADR-001.json`
-- M0 开发状态与验证结果：`project-drumbeat-m0-build-status.json`
+- 项目进度与问题清单：`docs/进度与验收/项目进度.md`
+- 游戏策划案（可读版）：`docs/策划案/project-drumbeat-game-design-proposal.md`
+- 游戏策划案（DOCX 版）：`docs/策划案/project-drumbeat-game-design-proposal.docx`
+- 游戏策划案（结构化数据版）：`docs/策划案/project-drumbeat-game-design-proposal.json`
+- 豆包像素素材提示词套件：`docs/策划案/project-drumbeat-doubao-pixel-prompt-kit.md`
+- 第 8 小组课程策划案：`潮汕英歌舞非遗数字化传承与创新实践_第8小组策划案(1).docx`
+- 详细设计文档：`docs/设计文档/project-drumbeat-detailed-design-document.json`
+- 合拍判定与节拍表：`docs/设计文档/project-drumbeat-beat-judgement-tables.json`
+- 判定锚点与 BPM 决策记录：`docs/设计文档/project-drumbeat-decision-ADR-001.json`
+- M0 任务清单：`docs/进度与验收/project-drumbeat-m0-prototype-tasklist.json`
+- M0 开发状态与验证结果：`docs/进度与验收/project-drumbeat-m0-build-status.json`
+- 美术素材需求清单：`docs/进度与验收/project-drumbeat-art-asset-manifest.json`
 
 ---
 
@@ -271,7 +271,7 @@ npm install
 
 ```bash
 cd tools
-npm run docx -- ../project-drumbeat-game-design-proposal.md ../project-drumbeat-game-design-proposal.docx
+npm run docx -- ../docs/策划案/project-drumbeat-game-design-proposal.md ../docs/策划案/project-drumbeat-game-design-proposal.docx
 ```
 
 脚本支持多级标题、无序列表（2 空格缩进为二级）、有序列表、表格、代码块、引用与行内 `**粗体**` / `` `代码` ``。版式为 A4、页边距 1 英寸、中文用 Microsoft YaHei，标题带大纲级别（Word 导航窗格可跳章）。

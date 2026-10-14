@@ -12,7 +12,7 @@
       "project-drumbeat-decision-ADR-001.json（判定锚点与 BPM 决策记录）",
       "project-drumbeat-m0-prototype-tasklist.json（M0 原型任务清单）",
       "project-drumbeat-m0-build-status.json（M0 开发状态与验证结果）",
-      "picture/（第8小组提供的英歌像素素材包）"
+      "art-source/picture/（第8小组提供的英歌像素素材包）"
     ],
     "note": "本策划案以「已有 M0 可玩原型 + 新到位的像素素材包」为起点，重点回答一件事：接下来用 AI 如何一步一步把游戏做完。"
   },
@@ -34,7 +34,7 @@
 
   "2_art_style_spec": {
     "style": "像素风（16-bit 取向），角色为清晰像素块 + 硬边描边，背景为像素化中式建筑群与视差层",
-    "source_pack": "picture/ 文件夹（由豆包 Seedream 生成，按 project-drumbeat-doubao-pixel-prompt-kit.md 的提示词产出）",
+    "source_pack": "art-source/picture/ 文件夹（由豆包 Seedream 生成，按 project-drumbeat-doubao-pixel-prompt-kit.md 的提示词产出）",
     "key_color_rule": {
       "background_key": "#FF00FF 品红（部分 JPEG 导出后偏 #E00060 玫红）",
       "removal_method": "边界泛洪填充：只删与画面边缘连通的底色，再用「B 远大于 G」规则清除被角色包围的残余；背景层不做粉色清除（粉色可能是画作本身）",
@@ -153,7 +153,7 @@
   },
 
   "5_asset_inventory": {
-    "note": "picture/ 图片包已经处理为 drumbeat-m0/assets/ 下的可用素材，清单见 drumbeat-m0/assets/manifest.json",
+    "note": "art-source/picture/ 图片包已经处理为 drumbeat-m0/assets/ 下的可用素材，清单见 drumbeat-m0/assets/manifest.json",
     "available": {
       "player": ["run_0..3（跑动 4 帧）", "charge（蓄力）", "jump（跳跃）", "death（阵亡）"],
       "enemy": ["idle", "walk", "attack1", "attack2", "block", "defeat_0..2"],
@@ -235,7 +235,7 @@
         "steps": [
           {
             "step": "M1-1 素材落位",
-            "action": "已处理：picture/ → drumbeat-m0/assets/（抠图、分帧、统一整数倍缩放），清单见 assets/manifest.json",
+            "action": "已处理：art-source/picture/ → drumbeat-m0/assets/（抠图、分帧、统一整数倍缩放），清单见 assets/manifest.json",
             "verify": "assets/_preview_player.png、_preview_enemy.png 中角色完整、无品红残留、比例一致"
           },
           {
