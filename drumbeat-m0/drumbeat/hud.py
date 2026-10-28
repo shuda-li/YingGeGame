@@ -36,6 +36,10 @@ PARALLAX_LAYERS = [
 ]
 FOREGROUND_LAYER = ("fore", 1.35, 0.20, "top", 0.02, 760)
 
+# 跑动帧播放顺序：run_4/run_5 是 run_0/run_2 腿部镜像得到的对侧腿触地帧，
+# 8 拍实现「右触地 → 过渡 → 左触地 → 过渡」的左右腿交替，每步约 0.9 单位
+RUN_CYCLE = (0, 1, 4, 1, 2, 3, 5, 3)
+
 
 def load_font(size: int) -> pygame.font.Font:
     for name in ("microsoftyaheiui", "microsoftyahei", "simhei", "simsun", "notosanscjksc", "arialunicodems"):
@@ -240,7 +244,9 @@ class Renderer:
         self._anim_dist += abs(player.x - self._last_px)
         self._last_px = player.x
         if abs(player.vx) > 0.4:
-            return "run", int(self._anim_dist / 0.45) % 4
+            # 8 拍循环：右触地 → 过渡 → 左触地 → 过渡 →（第二组触地姿）→ 过渡，
+            # run_4/run_5 为腿部镜像得到的对侧腿帧，实现左右腿交替
+            return "run", RUN_CYCLE[int(self._anim_dist / 0.45) % len(RUN_CYCLE)]
         return "run", 0        # 缺 idle 素材，暂以跑动首帧站立
 
     def _draw_player(self, surf: pygame.Surface, player, combat) -> None:

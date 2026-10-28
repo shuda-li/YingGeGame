@@ -1,0 +1,1359 @@
+{
+  "_meta": {
+    "title": "《踏鼓 / Project Drumbeat》战斗系统实体定义",
+    "subtitle": "角色与怪物：基础属性 / 攻击机制 / 运动机制 / 状态效果",
+    "version": "v1.0",
+    "date": "2026-10-28",
+    "project_codename": "踏鼓 / Project Drumbeat",
+    "source_documents": [
+      "docs/策划案/project-drumbeat-game-design-proposal.md（策划案 v1.0，S1–S6 系统表）",
+      "docs/设计文档/project-drumbeat-detailed-design-document.json（详细设计：动作帧数据、敌人图鉴、Boss 三阶段）",
+      "drumbeat-m0/drumbeat/data/feel_params.json（M0 实测手感参数）",
+      "drumbeat-m0/drumbeat/data/frame_data.json（M0 招式帧数据）"
+    ],
+    "purpose": "作为战斗系统的单一数据源（SSOT）：程序按本文件解析实体属性、攻击判定与状态效果；策划改数值不改代码。凡标注 source 为 \"new\" 的字段为本文件首次补全的设计值，须在 M2 原型中实跑校准。",
+    "companion_data_tables": {
+      "note": "本文件专注「实体级」定义；节拍/判定/关卡布局仍由下列既有数据表承担，字段冲突时以本文件为准并须回写同步。",
+      "feel_params": "drumbeat-m0/drumbeat/data/feel_params.json",
+      "frame_data": "drumbeat-m0/drumbeat/data/frame_data.json",
+      "beat_tables": "drumbeat-m0/drumbeat/data/beat_tables.json",
+      "tempo_layers": "drumbeat-m0/drumbeat/data/tempo_layers.json",
+      "level_segment": "drumbeat-m0/drumbeat/data/level_segment.json"
+    }
+  },
+
+  "schema_conventions": {
+    "units": {
+      "length": "世界单位（world unit），PIXELS_PER_UNIT = 80，屏幕 1280x720 可见世界 16x9 单位",
+      "time_ms": "毫秒；所有持续时间类字段以 _ms / _s 结尾",
+      "time_f": "参考帧（60fps 为基准帧率），帧数类字段以 _f 结尾；运行时固定步长 1/120s，帧数按 2 步/帧换算",
+      "speed": "单位/秒（units_per_second）",
+      "angle": "度（仅远程弹道与俯冲方向使用，0 = 朝向正右方）"
+    },
+    "naming_rules": {
+      "case": "snake_case 小写下划线",
+      "stats": "基础属性统一收在 base_stats；hp 为当前值上限语义（本作无回复道具，关卡内不回血）",
+      "attack_entry": "每个攻击条目统一含 attack_type / range_units / damage / startup_f / active_f / recovery_f / cooldown / trigger 字段",
+      "reference": "跨节引用统一使用 *_ref 指向 shared_definitions 或 status_effects 的 id",
+      "note_fields": "note / notes / source 为注释性字段，程序解析时可忽略；source 标注数值出处：\"design\"（既有策划案）、\"m0\"（M0 数据表实测）、\"new\"（本文件新增待校准）"
+    },
+    "damage_type_enum": ["melee", "projectile", "aoe", "shockwave", "special"],
+    "attack_type_enum": {
+      "melee": "近身挥击，矩形判定盒置于身前",
+      "airborne_melee": "凌空挥击，判定盒随角色空中位置更新",
+      "dive_aoe": "俯冲落地后以落点为圆心的圆形判定",
+      "ranged_projectile": "发射投射物（鼓槌/弹丸），命中才结算",
+      "parry": "弹反判定，无伤害，成功触发敌方硬直",
+      "finisher_aoe": "终结技全场范围判定"
+    },
+    "movement_mode_enum": {
+      "input_driven": "玩家输入驱动（含加速度/摩擦模型）",
+      "ground_patrol": "沿地面区间往返巡逻（横版，无寻路图）",
+      "hover": "空中悬浮，正弦浮动 + 俯冲突击",
+      "keep_distance": "与目标维持固定距离带，过近后退、过远追近",
+      "phase_teleport": "Boss 阶段转换演出位移（无敌）"
+    },
+    "status_effect_binding": "实体通过 status_effects.ids 引用 status_effects 表；未引用即默认为可受该效果影响的普通实体",
+    "extension_rules": [
+      "新增实体：复制同 category 模板条目，改数值并保持字段齐全，缺字段视为解析错误",
+      "新增攻击：补充完整攻击条目字段；帧数需同步登记到 frame_data.json",
+      "新增状态效果：在 status_effects 表追加 id 并填写 duration / trigger_condition / effect，再由实体引用"
+    ]
+  },
+
+  "shared_definitions": {
+    "damage_formula": {
+      "id": "dmg_std",
+      "formula": "final_damage = max(min_damage, floor((atk - target_def) * beat_multiplier * combo_multiplier * vulnerability_multiplier))",
+      "variables": {
+        "atk": "攻击方 base_stats.atk 或攻击条目 damage（攻击条目存在时优先）",
+        "target_def": "受击方 base_stats.def（正面/背面规则见 guard_break 状态）",
+        "min_damage": 1,
+        "beat_multiplier_ref": "beat_judgement_grades.damage_multiplier",
+        "combo_multiplier": { "value": 1.0, "note": "M2 前固定 1.0；成长系统上限 1.15（详细设计 6_progression），预留给槌花伤害倍率" },
+        "vulnerability_multiplier": { "value": 1.0, "note": "受击方处于破防/眩晕等易伤状态时由状态效果表提供倍率" }
+      },
+      "settlement_timing": "伤害只在攻击 active 帧实际命中时结算；判定反馈（锣钹音/槌花）在按键帧立即触发（ADR-001 锚点约定）",
+      "note": "玩家攻击套用 beat_multiplier；敌人攻击 beat_multiplier 恒为 1.0（敌人不合拍）"
+    },
+    "beat_judgement_grades": {
+      "note": "仅对玩家攻击生效；判定锚点为按键帧（keydown），音频时钟为唯一时间基准",
+      "grades": [
+        { "grade": "perfect", "name": "完美合拍", "tolerance_ms": 40, "damage_multiplier": 1.5, "drum_energy_multiplier": 1.8, "streak_delta": 1, "source": "design" },
+        { "grade": "good", "name": "合拍", "tolerance_ms": 80, "damage_multiplier": 1.3, "drum_energy_multiplier": 1.5, "streak_delta": 1, "source": "design" },
+        { "grade": "miss", "name": "未合拍", "tolerance_ms": null, "damage_multiplier": 1.0, "drum_energy_multiplier": 1.0, "streak_delta": "reset", "source": "design" }
+      ],
+      "assist_window_ms": 120,
+      "source": "design"
+    },
+    "frame_data_convention": {
+      "reference_fps": 60,
+      "phase_meaning": { "startup_f": "前摇（无判定，可被打断/出破绽）", "active_f": "判定帧（命中窗口）", "recovery_f": "后摇（不可再出招）" },
+      "cancel_window_rule": "取消窗口位于 recovery 的后 40% 帧，允许提前取消衔接下一段；技能链/连招字段为 next",
+      "enemy_telegraph_rule": "所有敌人攻击的 startup 阶段必须有可读前摇动作（AI 三原则），支持对击弹反",
+      "source": "m0"
+    },
+    "cooldown_policy": {
+      "note": "玩家连招段位不设独立冷却，由帧数据（后摇+取消窗口）与连击重置时间约束节奏；独立冷却只用于资源型/位移型技能",
+      "combo_reset_s": { "value": 2.0, "note": "2 秒内未命中则 hit_count（槌花连段）归零", "source": "m0" },
+      "hit_count_increment": 1
+    },
+    "combat_globals": {
+      "hitstop_ms": { "min": 40, "max": 80, "rule": "合拍命中取上限", "source": "m0" },
+      "hurt_invincible_ms": { "value": 800, "note": "玩家受击后无敌，避免连续受击致死", "source": "m0" },
+      "screen_knockback_rule": "击退为水平位移脉冲，速度衰减模型见 status_effects.knockback",
+      "parry_global": {
+        "window_ms": 100,
+        "stun_on_success_ms": 1200,
+        "energy_gain": 25,
+        "energy_gain_on_beat": 50,
+        "fail_penalty_f": 12,
+        "fail_penalty_note": "过早按键进入对击后摇，暴露 12 帧破绽（受击伤害 x1.25，见 vulnerability 状态）",
+        "source": "m0"
+      }
+    }
+  },
+
+  "status_effects": {
+    "_note": "全局状态效果表。实体通过 base_stats / attack / movement 中的 status_effects.ids 字段引用；duration 与 trigger_condition 为必填。",
+    "definitions": [
+      {
+        "id": "stun_parry",
+        "name": "对击硬直（眩晕）",
+        "category": "control",
+        "duration_ms": 1200,
+        "trigger_condition": "玩家在敌方攻击命中前 100ms 内按下攻击键（对击弹反成功），或 Boss 阶段 2 镜像对击成功",
+        "effect": {
+          "action_locked": true,
+          "vulnerability_multiplier": 1.25,
+          "interrupt_channel": true,
+          "note": "被打断的攻击直接进入 recovery 且不可取消"
+        },
+        "stacking": "不叠加，重复触发刷新时长",
+        "immunity": ["boss_phase_transition（阶段转换演出 1.5s 无敌期免疫）"],
+        "source": "m0"
+      },
+      {
+        "id": "hit_stun",
+        "name": "受击硬直",
+        "category": "control",
+        "duration_ms": 300,
+        "trigger_condition": "实体受到实际伤害（final_damage > 0）时施加",
+        "effect": {
+          "action_locked": true,
+          "movement_locked": true,
+          "interrupt_attack": true,
+          "note": "打断敌方 startup/active 阶段的攻击（受击打断规则）"
+        },
+        "stacking": "不叠加，刷新时长",
+        "immunity": "super_armor 状态下免疫",
+        "source": "new"
+      },
+      {
+        "id": "knockback",
+        "name": "击退位移",
+        "category": "displacement",
+        "duration_ms": 250,
+        "trigger_condition": "被标注 knockback 的攻击命中（玩家挥槌三段末段、敌方重击、Boss 冲撞类）",
+        "effect": {
+          "displacement_model": "初速度 vx = knockback_speed_units_per_s，线性衰减至 0（摩擦系数同实体 friction）",
+          "horizontal_only": true,
+          "launch_airborne": false,
+          "note": "仅水平位移不抛空，保证横版手感；被击退期间叠加 hit_stun 时长"
+        },
+        "stacking": "后触发覆盖前触发（取更大初速度）",
+        "immunity": ["super_armor（重装/Boss 攻击中）", "dash_invincible", "hurt_invincible"],
+        "per_attack_overrides": [
+          { "ref": "atk_g3", "knockback_speed_units_per_s": 9.0, "note": "玩家末段击退" },
+          { "ref": "enemy_heavy_slam", "knockback_speed_units_per_s": 10.0 }
+        ],
+        "source": "new"
+      },
+      {
+        "id": "slow",
+        "name": "减速",
+        "category": "control",
+        "duration_ms": 2000,
+        "trigger_condition": "被踏地震波 / 鼓浪冲击类 shockwave 攻击命中（Boss B1 阶段 1、B3 阶段 3）",
+        "effect": {
+          "move_speed_multiplier": 0.6,
+          "attack_speed_multiplier": 1.0,
+          "note": "只降移速不降攻速，避免破坏合拍帧数据节奏——这是本作关键取舍"
+        },
+        "stacking": "不叠加，重复触发刷新时长",
+        "immunity": ["dash（抢步期间不受减速影响）"],
+        "source": "new"
+      },
+      {
+        "id": "super_armor",
+        "name": "霸体",
+        "category": "immunity",
+        "duration_ms": "equal_to_attack_active_plus_startup",
+        "trigger_condition": "重装/盾兵在自身攻击 startup 开始至 recovery 结束期间自动获得",
+        "effect": {
+          "immune": ["hit_stun", "knockback"],
+          "still_takes_damage": true,
+          "note": "霸体只免疫控制不免疫伤害；对击弹反仍可击破（弹反无视霸体，是重装的指定解法）"
+        },
+        "stacking": "非独立状态，与攻击动作绑定",
+        "source": "new"
+      },
+      {
+        "id": "guard_break",
+        "name": "破防（盾兵正面免伤解除）",
+        "category": "vulnerability",
+        "duration_ms": 3000,
+        "trigger_condition": "以下任一：1) 攻击命中盾兵背面（背面 def = 0）；2) 盾兵承受一次满堂彩；3) 盾兵被对击弹反命中",
+        "effect": {
+          "def_override": 0,
+          "vulnerability_multiplier": 1.25,
+          "visual_cue": "盾面碎裂特效 + 掉盾动画"
+        },
+        "stacking": "不叠加，刷新时长",
+        "source": "new"
+      },
+      {
+        "id": "vulnerability",
+        "name": "易伤（弹反破绽）",
+        "category": "vulnerability",
+        "duration_ms": 200,
+        "trigger_condition": "玩家对击失败（过早按键）后的 12 帧破绽窗口内被命中",
+        "effect": { "damage_taken_multiplier": 1.25 },
+        "stacking": "不叠加",
+        "source": "design（12 帧破绽的具体惩罚量化为 new）"
+      },
+      {
+        "id": "dash_invincible",
+        "name": "抢步无敌帧",
+        "category": "immunity",
+        "duration_ms": 200,
+        "trigger_condition": "玩家发动抢步（Dash）后自动获得",
+        "effect": { "immune": ["all_damage", "knockback", "slow", "hit_stun"] },
+        "stacking": "不叠加",
+        "source": "m0"
+      },
+      {
+        "id": "hurt_invincible",
+        "name": "受击无敌",
+        "category": "immunity",
+        "duration_ms": 800,
+        "trigger_condition": "玩家受到任何实际伤害后自动获得",
+        "effect": { "immune": ["all_damage", "knockback", "hit_stun"], "visual_cue": "角色闪烁" },
+        "stacking": "不叠加，刷新时长",
+        "source": "m0"
+      },
+      {
+        "id": "finisher_invincible",
+        "name": "满堂彩无敌",
+        "category": "immunity",
+        "duration_ms": 1200,
+        "trigger_condition": "玩家释放满堂彩（终结技）后自动获得",
+        "effect": { "immune": ["all_damage", "knockback", "slow", "hit_stun"] },
+        "stacking": "不叠加",
+        "source": "m0"
+      },
+      {
+        "id": "boss_phase_transition",
+        "name": "Boss 阶段转换无敌",
+        "category": "immunity",
+        "duration_ms": 1500,
+        "trigger_condition": "Boss HP 跨越阶段阈值时自动触发",
+        "effect": {
+          "immune": ["all_damage", "stun_parry", "hit_stun", "knockback"],
+          "clear_projectiles": true,
+          "note": "全场清弹 + 1.5 秒演出，三个 Boss 通用规则"
+        },
+        "stacking": "不叠加",
+        "source": "design"
+      },
+      {
+        "id": "silence",
+        "name": "沉默领域（环境状态）",
+        "category": "environment",
+        "duration_ms": "持续至 B3 阶段 1 结束",
+        "trigger_condition": "哑鼓之主（B3）阶段 1 释放沉默领域",
+        "effect": {
+          "bgm_muted": true,
+          "beat_feedback_visual_only": true,
+          "judgement_window_override_ms": 120,
+          "note": "剥夺 BGM，玩家靠灵蛇与鼓面图标读拍；判定窗口放宽至 ±120ms 作补偿"
+        },
+        "stacking": "不叠加",
+        "source": "design"
+      }
+    ]
+  },
+
+  "entities": {
+    "characters": [
+      {
+        "id": "player_striker",
+        "name": "槌手（玩家角色）",
+        "type": "character",
+        "role": "英歌队引路人，主操角色",
+        "base_stats": {
+          "hp": 100,
+          "hp_max_growth": { "base": 100, "max": 120, "source": "关卡推进自动提升", "growth": "design" },
+          "atk": 12,
+          "atk_note": "atk 仅作为伤害公式基准下限；实际伤害以各攻击条目 damage 为准（12–30），atk 成长上限 +15%（槌花伤害倍率 1.0→1.15）",
+          "def": 2,
+          "def_note": "source: new。动作游戏取向的低减伤：巡逻兵 10 伤→实伤 8，重装 30 伤→28，保证普通敌人单次失误不致命（damage_reference 设计规则）",
+          "move_speed": {
+            "walk_max_units_per_s": 8.0,
+            "dash_units_per_s": 14.0,
+            "acceleration_units_per_s2": 30.0,
+            "friction_units_per_s2": 40.0,
+            "gravity_units_per_s2": 42.0
+          },
+          "jump": {
+            "height_units": 3.2,
+            "air_time_ms": 520,
+            "variable_height": true,
+            "second_jump_ratio": 0.8,
+            "reset_on_land": true
+          },
+          "source": { "hp": "m0", "move_speed": "m0", "jump": "m0", "atk": "design", "def": "new" }
+        },
+        "movement_mechanics": {
+          "movement_mode": "input_driven",
+          "pathfinding": "无寻路（玩家输入驱动 + AABB 碰撞，自研固定步长运动 1/120s）",
+          "run_and_gun": "跑酷态与战斗态共享同一套位移参数，攻击不锁死移动，切换不重置速度（设计支柱「跑打无缝」）",
+          "special_moves": [
+            { "id": "dash", "name": "抢步", "speed_units_per_s": 14.0, "duration_ms": 250, "cooldown_s": 0.25, "invincible_ms": 200, "note": "位移与闪避合一；期间免疫减速", "source": "m0" },
+            { "id": "slide", "name": "矮子步", "duration_ms": 400, "hitbox_height_units": 0.9, "note": "低姿通过 1.8 高悬空横梁（站立高 1.8 被挡，矮子步高 0.9 可过）；可取消接地面攻击", "source": "m0" },
+            { "id": "wall_jump", "name": "贴壁/墙跳", "wall_slide_deceleration": true, "jump_reverse_thrust": true, "note": "第 4 关解锁；贴壁缓降 + 反向蹬墙", "source": "design" }
+          ],
+          "assists": {
+            "jump_buffer_ms": 120,
+            "coyote_ms": 100,
+            "note": "起跳缓冲与土狼时间，实时可调（F2 面板）",
+            "source": "m0"
+          },
+          "chase_and_retreat": "不适用（玩家实体无 AI 追击/撤退逻辑）",
+          "hit_feedback": {
+            "hurt_state": "挫（Hurt）：动作中断、短硬直",
+            "hurt_stun_ms": 250,
+            "knockback_on_hit": { "speed_units_per_s": 8.0, "duration_ms": 250, "direction": "背向攻击来源", "status_effects_ref": "knockback" },
+            "hurt_invincible_ms": 800,
+            "hitstop_on_deal_hit_ms": { "min": 40, "max": 80, "rule": "合拍命中取上限" },
+            "source": { "hurt_stun_ms": "new", "knockback_on_hit": "new", "others": "m0" }
+          }
+        },
+        "attack_mechanics": {
+          "attack_system": "帧数据驱动（startup / active / recovery），60fps 参考帧率；连招段位无独立冷却，节奏由帧数据与取消窗口约束",
+          "cancel_window_rule": "位于各段 recovery 的后 40% 帧处，可提前取消衔接 next 段",
+          "combo_chains": {
+            "ground": ["atk_g1 → atk_g2 → atk_g3（三段挥槌）"],
+            "air": ["atk_a1 → atk_a2 → dive（凌空两段接劈山）"],
+            "cross": "空中连招落地后可立即接地面一段，形成不断链输出",
+            "combo_reset_s": 2.0
+          },
+          "parry": {
+            "id": "parry",
+            "name": "对击",
+            "attack_type": "parry",
+            "trigger": "敌人攻击命中前 100ms 内按下攻击键 J",
+            "startup_f": 2,
+            "active_f": 8,
+            "recovery_f": 12,
+            "damage": 0,
+            "range_units": 1.2,
+            "cooldown": "无独立冷却；失败惩罚见 vulnerability 状态（12 帧破绽）",
+            "on_success": {
+              "enemy_stun_ref": "stun_parry",
+              "drum_energy_gain": 25,
+              "on_beat_energy_gain": 50,
+              "note": "弹反恰好落在鼓点判定点为「合拍弹反」，鼓劲 ×2"
+            },
+            "source": "m0"
+          },
+          "finisher": {
+            "id": "finisher",
+            "name": "满堂彩",
+            "attack_type": "finisher_aoe",
+            "trigger_condition": "鼓劲槽满（100）且合拍连段 ≥ 4（M0 原型数据表 streak_required=0 为调试放宽，正式版取 4）",
+            "damage": 200,
+            "aoe_radius_units": 6.0,
+            "duration_ms": 2000,
+            "invincible_ms": 1200,
+            "speed_buff": { "units_per_s": 14.0, "duration_ms": 5000 },
+            "streak_bonus": { "streak_8": "+10% 伤害", "streak_12": "+20% 伤害", "streak_16": "+30%（上限）" },
+            "cooldown": "资源驱动（消耗整槽鼓劲），无独立冷却",
+            "note": "可击破盾兵正面格挡（触发 guard_break）；全场锣鼓齐鸣演出",
+            "source": "m0"
+          },
+          "attacks": [
+            {
+              "id": "atk_g1",
+              "name": "挥槌·一段",
+              "attack_type": "melee",
+              "stance": "ground",
+              "damage_type": "melee",
+              "damage": 12,
+              "range_units": 1.2,
+              "hitbox_note": "身前矩形判定盒：宽 1.2 高 1.0，随 facing 翻转",
+              "startup_f": 8,
+              "active_f": 4,
+              "recovery_f": 14,
+              "cancel_window_f": 6,
+              "next": "atk_g2",
+              "cooldown": "无（连招驱动）",
+              "trigger": "地面按攻击键 J",
+              "beat_judgement": true,
+              "status_effects_on_hit": ["hit_stun"],
+              "source": { "frame": "m0", "range_units": "new" }
+            },
+            {
+              "id": "atk_g2",
+              "name": "挥槌·二段",
+              "attack_type": "melee",
+              "stance": "ground",
+              "damage_type": "melee",
+              "damage": 14,
+              "range_units": 1.2,
+              "startup_f": 7,
+              "active_f": 4,
+              "recovery_f": 14,
+              "cancel_window_f": 6,
+              "next": "atk_g3",
+              "cooldown": "无",
+              "trigger": "一段取消窗口内或后摇结束后按 J",
+              "beat_judgement": true,
+              "status_effects_on_hit": ["hit_stun"],
+              "source": { "frame": "m0", "range_units": "new" }
+            },
+            {
+              "id": "atk_g3",
+              "name": "挥槌·三段",
+              "attack_type": "melee",
+              "stance": "ground",
+              "damage_type": "melee",
+              "damage": 22,
+              "range_units": 1.4,
+              "startup_f": 12,
+              "active_f": 5,
+              "recovery_f": 24,
+              "cancel_window_f": 10,
+              "next": null,
+              "cooldown": "无",
+              "trigger": "二段取消窗口内按 J",
+              "beat_judgement": true,
+              "status_effects_on_hit": ["hit_stun", "knockback"],
+              "knockback_speed_units_per_s": 9.0,
+              "note": "末段击退，硬直较大",
+              "source": { "frame": "m0", "range_units": "new", "knockback": "new" }
+            },
+            {
+              "id": "atk_a1",
+              "name": "凌空挥槌·一段",
+              "attack_type": "airborne_melee",
+              "stance": "air",
+              "damage_type": "melee",
+              "damage": 14,
+              "range_units": 1.3,
+              "startup_f": 6,
+              "active_f": 4,
+              "recovery_f": 10,
+              "cancel_window_f": 4,
+              "next": "atk_a2",
+              "cooldown": "无",
+              "trigger": "空中按攻击键 J",
+              "beat_judgement": true,
+              "status_effects_on_hit": ["hit_stun"],
+              "note": "空中起手；配合二段跳实现空中槌花连段",
+              "source": { "frame": "m0", "range_units": "new" }
+            },
+            {
+              "id": "atk_a2",
+              "name": "凌空挥槌·二段",
+              "attack_type": "airborne_melee",
+              "stance": "air",
+              "damage_type": "melee",
+              "damage": 18,
+              "range_units": 1.3,
+              "startup_f": 8,
+              "active_f": 4,
+              "recovery_f": 16,
+              "cancel_window_f": 6,
+              "next": "dive",
+              "cooldown": "无",
+              "trigger": "凌空一段取消窗口内按 J",
+              "beat_judgement": true,
+              "status_effects_on_hit": ["hit_stun"],
+              "source": { "frame": "m0", "range_units": "new" }
+            },
+            {
+              "id": "dive",
+              "name": "劈山",
+              "attack_type": "dive_aoe",
+              "stance": "air_to_ground",
+              "damage_type": "aoe",
+              "damage": 30,
+              "range_units": 2.5,
+              "aoe_radius_units": 2.5,
+              "startup_f": 10,
+              "active_f": "until_land",
+              "active_f_note": "判定持续至落地，落地瞬间结算 AoE",
+              "recovery_f": 18,
+              "cancel_window_f": 0,
+              "next": null,
+              "cooldown": "无",
+              "trigger": "空中按下 + 攻击（下 + J）；凌空二段可衔接",
+              "beat_judgement": true,
+              "break_wall": true,
+              "status_effects_on_hit": ["hit_stun", "knockback"],
+              "note": "快速下落 + 落地 AoE，可破坏可破坏墙体；endless_fall 期间不受击退",
+              "source": { "frame": "m0" }
+            }
+          ]
+        },
+        "resource_systems": {
+          "drum_energy": {
+            "gauge_max": 100,
+            "gain_sources": {
+              "run_gain_per_s": 6.0,
+              "run_gain_speed_ref_units_per_s": 8.0,
+              "hit_gain": 3.0,
+              "beat_multiplier_range": [1.5, 1.8],
+              "parry_gain": 25,
+              "parry_on_beat_gain": 50
+            },
+            "decay": { "per_s": 2.0, "grace_s": 3.0, "note": "停止进攻 3 秒后缓慢衰减" },
+            "source": "m0"
+          }
+        }
+      }
+    ],
+
+    "monsters": [
+      {
+        "_template_note": "普通怪物模板：base_stats / attack_mechanics.attacks[] / movement_mechanics 三段式结构，Boss 额外增加 phases 字段",
+        "id": "enemy_patrol",
+        "name": "巡逻兵（哑鼓傀儡）",
+        "type": "monster",
+        "category": "melee",
+        "threat": "低",
+        "first_appears": "关卡 1 赛段 1-3（无陷阱环境首登场）",
+        "base_stats": {
+          "hp": 40,
+          "atk": 10,
+          "def": 0,
+          "move_speed": { "patrol_units_per_s": 2.0, "chase_units_per_s": 4.5 },
+          "super_armor": false,
+          "source": { "hp": "design", "atk": "design", "def": "new", "move_speed": "new" }
+        },
+        "attack_mechanics": {
+          "attacks": [
+            {
+              "id": "enemy_patrol_slash",
+              "name": "近战挥砍",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 10,
+              "range_units": 1.0,
+              "startup_f": 20,
+              "active_f": 5,
+              "recovery_f": 20,
+              "cooldown_s": 1.8,
+              "cooldown_note": "cooldown 为攻击间隔（recovery 结束到下一次可出手），source: new",
+              "trigger": "目标进入追击距离 ≤ 1.0 且自身不在硬直/受击状态",
+              "parryable": true,
+              "parry_difficulty": "易",
+              "telegraph": "举槌扬起动作 + 头顶警示标记（前摇 20 帧内可读）",
+              "status_effects_on_hit": ["knockback"],
+              "beat_judgement": false,
+              "source": { "frame": "design", "range_units": "new", "cooldown": "new" }
+            }
+          ]
+        },
+        "movement_mechanics": {
+          "movement_mode": "ground_patrol",
+          "pathfinding": "无寻路图（横版直线运动）：在 spawn 配置的 patrol_left / patrol_right 区间内往返",
+          "patrol_rule": "沿巡逻区间匀速往返，接近边界折返",
+          "aggro_rule": { "aggro_radius_units": 6.0, "aggro_condition": "玩家进入半径或受到玩家伤害", "de_aggro_condition": "玩家脱离半径 10 单位或玩家死亡", "source": "new" },
+          "chase_rule": "进入追击后以 chase 速度直线逼近玩家 x 坐标，保持面向玩家；同屏敌人攻击节奏错开（AI 三原则）",
+          "retreat_rule": "不撤退（低威胁近战单位战至被击破）",
+          "hit_feedback": {
+            "hit_stun_ms": 300,
+            "status_effects_ref": ["hit_stun", "knockback", "stun_parry"],
+            "knockback_resist": false,
+            "death_anim": "defeat_0..2 三帧倒地（素材已有）",
+            "source": { "hit_stun_ms": "new", "others": "design" }
+          }
+        }
+      },
+      {
+        "id": "enemy_gunner",
+        "name": "枪手 / 远程鼓师（M2 投掷鼓槌）",
+        "type": "monster",
+        "category": "ranged",
+        "threat": "中",
+        "first_appears": "关卡 2（M2-2 新增单位，前摇清晰可读为验收标准）",
+        "base_stats": {
+          "hp": 35,
+          "atk": 15,
+          "def": 0,
+          "move_speed": { "patrol_units_per_s": 1.5, "chase_units_per_s": 3.0, "retreat_units_per_s": 3.5 },
+          "super_armor": false,
+          "source": { "hp": "design", "atk": "design", "def": "new", "move_speed": "new" }
+        },
+        "attack_mechanics": {
+          "attacks": [
+            {
+              "id": "enemy_gunner_throw",
+              "name": "投掷鼓槌（远程点射）",
+              "attack_type": "ranged_projectile",
+              "damage_type": "projectile",
+              "damage": 15,
+              "range_units": 8.0,
+              "projectile": {
+                "speed_units_per_s": 10.0,
+                "gravity": false,
+                "straight_line": true,
+                "destroy_on_hit": true,
+                "parryable_projectile": false,
+                "note": "弹道为直线弹丸；可被无敌帧（抢步）穿过，不可被弹反（弹反仅针对近战挥击类）"
+              },
+              "startup_f": 25,
+              "active_f": 3,
+              "recovery_f": 25,
+              "cooldown_s": 2.5,
+              "trigger": "玩家处于射程 [3.0, 8.0] 区间且视线无遮挡",
+              "parryable": false,
+              "parry_difficulty": "中（指躲避难度：绕后接近或劈山突进）",
+              "telegraph": "扬臂拉弓姿势 + 枪口/槌尖高亮，前摇 25 帧可读",
+              "status_effects_on_hit": ["knockback"],
+              "counter_hint": "关卡设计规则：枪手必须提供可绕行或可突进的路线",
+              "source": { "frame": "design", "range_units": "new", "projectile": "new", "cooldown": "new" }
+            }
+          ]
+        },
+        "movement_mechanics": {
+          "movement_mode": "keep_distance",
+          "pathfinding": "无寻路图；以玩家为基准的距离保持模型",
+          "patrol_rule": "无玩家威胁时原地警戒（idle 素材）",
+          "aggro_rule": { "aggro_radius_units": 9.0, "aggro_condition": "玩家进入半径", "source": "new" },
+          "chase_rule": "玩家距离 > 8.0 时以 chase 速度追近至射程内",
+          "retreat_rule": "玩家距离 < 3.0 时以 retreat 速度背向玩家拉开至 5.0 以上；被逼入墙角则停止后退改为近身搏斗（防无解角落）",
+          "hit_feedback": {
+            "hit_stun_ms": 300,
+            "status_effects_ref": ["hit_stun", "knockback", "stun_parry"],
+            "knockback_resist": false,
+            "source": "new"
+          }
+        }
+      },
+      {
+        "id": "enemy_shield",
+        "name": "盾兵",
+        "type": "monster",
+        "category": "shielded",
+        "threat": "中",
+        "first_appears": "关卡 3 赛段 3-3（精英战）",
+        "base_stats": {
+          "hp": 80,
+          "atk": 20,
+          "def": 10,
+          "def_note": "def 10 仅正面生效（正面免伤设计）；背面 def = 0（触发 guard_break），数值对应详细设计「正面免伤，需破防」",
+          "move_speed": { "patrol_units_per_s": 1.2, "chase_units_per_s": 2.5 },
+          "super_armor": false,
+          "shield_block": {
+            "frontal_block": true,
+            "block_arc_deg": 120,
+            "blocked_damage_multiplier": 0.0,
+            "break_conditions": ["背面受击", "承受满堂彩", "被对击弹反命中"],
+            "break_effect_ref": "guard_break"
+          },
+          "source": { "hp": "design", "atk": "design", "def": "new", "shield_block": "new" }
+        },
+        "attack_mechanics": {
+          "attacks": [
+            {
+              "id": "enemy_shield_bash",
+              "name": "盾击",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 20,
+              "range_units": 1.0,
+              "startup_f": 28,
+              "active_f": 6,
+              "recovery_f": 28,
+              "cooldown_s": 2.2,
+              "trigger": "目标距离 ≤ 1.0",
+              "parryable": true,
+              "parry_difficulty": "中",
+              "telegraph": "举盾顶撞蓄力姿势，前摇 28 帧可读",
+              "status_effects_on_hit": ["knockback"],
+              "knockback_speed_units_per_s": 10.0,
+              "source": { "frame": "design", "range_units": "new", "cooldown": "new" }
+            }
+          ]
+        },
+        "movement_mechanics": {
+          "movement_mode": "ground_patrol",
+          "pathfinding": "无寻路图；缓步逼近并始终面向玩家（保持正面格挡朝向）",
+          "patrol_rule": "小区间缓慢巡逻",
+          "aggro_rule": { "aggro_radius_units": 7.0, "source": "new" },
+          "chase_rule": "面向玩家缓步逼近；玩家绕背时缓慢转身（转身速率 90°/s，source: new，给绕背打法留窗口）",
+          "retreat_rule": "不撤退",
+          "hit_feedback": {
+            "hit_stun_ms": 300,
+            "frontal_damage_rule": "正面受击先走 shield_block（伤害归 0 + 格挡火花特效，不触发 hit_stun）",
+            "status_effects_ref": ["hit_stun", "knockback", "stun_parry", "guard_break"],
+            "knockback_resist": "正面格挡时免疫击退；背面被击退",
+            "source": "new"
+          }
+        }
+      },
+      {
+        "id": "enemy_drone",
+        "name": "无人机（粉蝶采花阵单位）",
+        "type": "monster",
+        "category": "flyer",
+        "threat": "中",
+        "first_appears": "关卡 3 赛段 3-2（配合二段跳地形登场）",
+        "base_stats": {
+          "hp": 25,
+          "atk": 12,
+          "def": 0,
+          "move_speed": { "hover_units_per_s": 3.5, "dive_units_per_s": 8.0 },
+          "fly_height_range_units": [2.0, 4.5],
+          "super_armor": false,
+          "source": { "hp": "design", "atk": "design", "def": "new", "move_speed": "new" }
+        },
+        "attack_mechanics": {
+          "attacks": [
+            {
+              "id": "enemy_drone_dive",
+              "name": "俯冲撞击",
+              "attack_type": "dive_aoe",
+              "damage_type": "melee",
+              "damage": 12,
+              "range_units": 1.0,
+              "startup_f": 18,
+              "active_f": 4,
+              "recovery_f": 22,
+              "cooldown_s": 3.0,
+              "trigger": "玩家进入俯冲判定锥（水平距离 ≤ 3.0 且高度差 ≤ 3.0）",
+              "dive_model": { "direction": "锁定玩家当前位置直线俯冲", "angle_deg_range": [-80, 80], "climbs_back_after": true },
+              "parryable": true,
+              "parry_difficulty": "中",
+              "telegraph": "旋翼变色 + 悬停抖动，前摇 18 帧可读",
+              "status_effects_on_hit": ["knockback"],
+              "counter_hint": "二段跳空中槌花清理（粉蝶采花阵指定解法）",
+              "source": { "frame": "design", "range_units": "new", "cooldown": "new", "dive_model": "new" }
+            }
+          ]
+        },
+        "movement_mechanics": {
+          "movement_mode": "hover",
+          "pathfinding": "无寻路图；正弦浮动 + 与玩家保持水平跟随",
+          "patrol_rule": "在锚点附近 1.5 半径正弦悬浮（频率 0.5Hz，source: new）",
+          "aggro_rule": { "aggro_radius_units": 8.0, "source": "new" },
+          "chase_rule": "水平面以 hover 速度跟随玩家 x；高度维持在玩家上方 2.0–3.0",
+          "retreat_rule": "俯冲未命中后爬升回巡航高度并拉开 2.0 距离（惩罚窗口）",
+          "hit_feedback": {
+            "hit_stun_ms": 300,
+            "hit_stun_note": "空中受击硬直表现为旋翼停转下坠 300ms",
+            "status_effects_ref": ["hit_stun", "stun_parry"],
+            "knockback_resist": "免疫水平击退（空中单位），受击退表现为位移修正",
+            "source": "new"
+          }
+        }
+      },
+      {
+        "id": "enemy_heavy",
+        "name": "重装（猛虎下山阵单位）",
+        "type": "monster",
+        "category": "heavy",
+        "threat": "高",
+        "first_appears": "关卡 5 赛段 5-2（猛虎下山阵，自高处俯冲压阵）",
+        "base_stats": {
+          "hp": 200,
+          "atk": 30,
+          "def": 8,
+          "move_speed": { "patrol_units_per_s": 1.0, "chase_units_per_s": 2.0 },
+          "super_armor": true,
+          "super_armor_note": "攻击期间（startup→recovery）免疫 hit_stun 与 knockback；对击弹反仍可击破（弹反无视霸体）",
+          "source": { "hp": "design", "atk": "design", "def": "new", "super_armor": "new" }
+        },
+        "attack_mechanics": {
+          "attacks": [
+            {
+              "id": "enemy_heavy_slam",
+              "name": "范围重击（踏地）",
+              "attack_type": "aoe",
+              "damage_type": "shockwave",
+              "damage": 30,
+              "range_units": 2.0,
+              "aoe_shape": "以自身为圆心的地面半圆（半径 2.0）",
+              "startup_f": 40,
+              "active_f": 8,
+              "recovery_f": 35,
+              "cooldown_s": 4.0,
+              "trigger": "目标距离 ≤ 2.0",
+              "parryable": true,
+              "parry_difficulty": "难",
+              "telegraph": "高举双槌蓄力 + 脚下预警圈，前摇 40 帧充分可读",
+              "status_effects_on_hit": ["knockback"],
+              "knockback_speed_units_per_s": 10.0,
+              "counter_hint": "无敌帧（抢步）穿插输出，或以劈山反打",
+              "source": { "frame": "design", "range_units": "new", "cooldown": "new" }
+            }
+          ]
+        },
+        "movement_mechanics": {
+          "movement_mode": "ground_patrol",
+          "pathfinding": "无寻路图；缓步直线逼近",
+          "patrol_rule": "原地把守或极慢巡走",
+          "aggro_rule": { "aggro_radius_units": 8.0, "note": "猛虎下山布阵时可从高处直接俯冲入场（入场演出，source: new）", "source": "new" },
+          "chase_rule": "缓慢逼近，压迫走位而非贴身追击（AI 原则：优先维持攻击节奏而非追身）",
+          "retreat_rule": "不撤退，不追出布阵区间 ±6.0（超出后回到岗位，source: new）",
+          "hit_feedback": {
+            "hit_stun_ms": 0,
+            "hit_stun_note": "霸体：受击只结算伤害不打断动作、不位移",
+            "status_effects_ref": ["super_armor", "stun_parry", "guard_break"],
+            "knockback_resist": true,
+            "source": "new"
+          }
+        }
+      },
+
+      {
+        "id": "boss_drum_king",
+        "name": "鼓王·哑音（B1）",
+        "type": "monster",
+        "category": "boss",
+        "threat": "高",
+        "first_appears": "关卡 6 赛段 6-3（英歌擂台）",
+        "base_stats": {
+          "hp": 1200,
+          "atk": 28,
+          "def": 5,
+          "move_speed": { "chase_units_per_s": 3.0 },
+          "super_armor": true,
+          "super_armor_note": "仅在阶段转换演出（boss_phase_transition 1.5s）期间完全无敌；平时攻击中免疫 hit_stun",
+          "damage_band": [25, 40],
+          "source": { "hp": "design", "atk": "new（取 damage_band 中值）", "def": "new" }
+        },
+        "attack_mechanics": {
+          "attacks": [
+            {
+              "id": "b1_sweep",
+              "name": "横扫槌",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 25,
+              "range_units": 1.8,
+              "startup_f": 30,
+              "active_f": 6,
+              "recovery_f": 25,
+              "cooldown_s": 2.0,
+              "trigger": "阶段 1，玩家距离 ≤ 1.8",
+              "parryable": true,
+              "telegraph": "槌尾拖地划弧预备",
+              "status_effects_on_hit": ["knockback"],
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b1_stomp",
+              "name": "踏地震波",
+              "attack_type": "aoe",
+              "damage_type": "shockwave",
+              "damage": 25,
+              "range_units": 3.0,
+              "startup_f": 36,
+              "active_f": 8,
+              "recovery_f": 30,
+              "cooldown_s": 3.5,
+              "trigger": "阶段 1，玩家位于地面且距离 ≤ 3.0",
+              "parryable": false,
+              "counter_hint": "跳跃躲避（震波仅地面判定）",
+              "status_effects_on_hit": ["slow", "knockback"],
+              "slow_ref": "slow（踏地震波为 slow 的指定触发源）",
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b1_feint",
+              "name": "抢拍假动作",
+              "attack_type": "special",
+              "damage_type": "melee",
+              "damage": 0,
+              "range_units": 1.8,
+              "startup_f": 20,
+              "active_f": 0,
+              "recovery_f": 18,
+              "cooldown_s": 4.0,
+              "trigger": "阶段 2，反拍插入闷鼓重音诱导玩家提前按键",
+              "parryable": false,
+              "note": "本身无伤害；骗出玩家过早对击 → vulnerability 破绽，随后接三连槌惩罚",
+              "audio_cue": "闷鼓音色与真攻击可区分（风险对策）",
+              "source": { "name": "design", "机制": "design", "数值": "new" }
+            },
+            {
+              "id": "b1_triple",
+              "name": "三连槌",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 30,
+              "range_units": 1.8,
+              "startup_f": 24,
+              "active_f": 5,
+              "recovery_f": 20,
+              "cooldown_s": 2.5,
+              "trigger": "阶段 2，常接在抢拍假动作之后",
+              "combo": "同参数连续执行 3 次，每次间隔 = recovery + 4 帧",
+              "parryable": true,
+              "status_effects_on_hit": ["knockback"],
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b1_barrage",
+              "name": "鼓阵合击",
+              "attack_type": "aoe",
+              "damage_type": "shockwave",
+              "damage": 35,
+              "range_units": 5.0,
+              "aoe_shape": "以 Boss 为圆心全向",
+              "startup_f": 50,
+              "active_f": 10,
+              "recovery_f": 40,
+              "cooldown_s": 6.0,
+              "trigger": "阶段 3（极板 150 BPM），按鼓点节奏连续释放",
+              "parryable": false,
+              "telegraph": "全场鼓面同时上抬的可读预备",
+              "status_effects_on_hit": ["knockback"],
+              "vulnerable_window_note": "合击后喘息 1 秒（主输出窗口）",
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b1_whirl",
+              "name": "旋风槌",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 32,
+              "range_units": 2.2,
+              "startup_f": 30,
+              "active_f": 12,
+              "recovery_f": 35,
+              "cooldown_s": 3.0,
+              "trigger": "阶段 3，边旋转边向玩家推进（移动式判定）",
+              "parryable": false,
+              "counter_hint": "抢步无敌帧穿过或保持距离",
+              "status_effects_on_hit": ["knockback"],
+              "source": { "name": "design", "数值": "new" }
+            }
+          ]
+        },
+        "movement_mechanics": {
+          "movement_mode": "phase_teleport",
+          "movement_mode_note": "阶段 1–2 为地面缓步逼近；阶段转换用 1.5s 演出位移（清场重定位）",
+          "pathfinding": "无寻路图；擂台场地内直线逼近 + 攻击后拉开",
+          "chase_rule": "以 3.0 速度逼近至攻击距离；抢拍阶段刻意与玩家保持 2.0–3.0 中距离诱弹反",
+          "retreat_rule": "大招后摇期间后退 1.5 单位喘息（对应 vulnerable_window）",
+          "hit_feedback": {
+            "hit_stun_ms": 0,
+            "status_effects_ref": ["boss_phase_transition", "stun_parry"],
+            "knockback_resist": true,
+            "note": "对击成功仍可造成 1200ms 硬直（弹反无视霸体）"
+          }
+        },
+        "phases": [
+          {
+            "phase": 1,
+            "hp_ratio": 0.4,
+            "tempo": "中板 110",
+            "mechanic_exam": "跟拍对击：Boss 敲慢板，玩家需跟拍出对击",
+            "attacks": ["b1_sweep", "b1_stomp"],
+            "vulnerable_window": "每 4 小节末拍后 1.5 秒"
+          },
+          {
+            "phase": 2,
+            "hp_ratio": 0.35,
+            "tempo": "快板 140",
+            "mechanic_exam": "抢拍：反拍闷鼓重音诱导提前按键",
+            "attacks": ["b1_feint", "b1_triple"],
+            "vulnerable_window": "抢拍落空后 1.2 秒"
+          },
+          {
+            "phase": 3,
+            "hp_ratio": 0.25,
+            "tempo": "极板 150",
+            "mechanic_exam": "全场鼓声叠加，考验合拍稳定性与走位",
+            "attacks": ["b1_barrage", "b1_whirl"],
+            "vulnerable_window": "合击后喘息 1 秒"
+          }
+        ],
+        "transition_rule": { "status_effect_ref": "boss_phase_transition", "duration_ms": 1500, "clear_projectiles": true },
+        "source": { "phases": "design", "attacks": { "名称": "design", "数值": "new" } }
+      },
+
+      {
+        "id": "boss_shadow_songsong",
+        "name": "司鼓·宋江影（B2）",
+        "type": "monster",
+        "category": "boss",
+        "threat": "高",
+        "first_appears": "关卡 11 赛段 11-3（鼓楼顶层）",
+        "base_stats": {
+          "hp": 1800,
+          "atk": 33,
+          "def": 8,
+          "move_speed": { "chase_units_per_s": 3.5 },
+          "super_armor": true,
+          "damage_band": [25, 40],
+          "source": { "hp": "design", "atk": "new", "def": "new" }
+        },
+        "attack_mechanics": {
+          "attacks": [
+            {
+              "id": "b2_snake_summon",
+              "name": "长蛇阵召唤",
+              "attack_type": "special",
+              "damage_type": "special",
+              "damage": 0,
+              "range_units": 0,
+              "cast_duration_ms": 2000,
+              "cooldown_s": 12.0,
+              "trigger": "阶段 1，血量进入阶段后首次 + 每循环",
+              "effect": "召唤 3 名巡逻兵成列推进（长蛇阵）",
+              "parryable": false,
+              "counter_hint": "破阵后 Boss 进入 2 秒易伤窗口",
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b2_dragon_charge",
+              "name": "双龙出海冲锋",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 28,
+              "range_units": 2.0,
+              "startup_f": 32,
+              "active_f": 8,
+              "recovery_f": 30,
+              "cooldown_s": 4.0,
+              "trigger": "阶段 1，玩家距离 3.0–6.0",
+              "charge_speed_units_per_s": 9.0,
+              "charge_distance_units": 6.0,
+              "parryable": true,
+              "status_effects_on_hit": ["knockback"],
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b2_mirror_triple",
+              "name": "镜像三连",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 30,
+              "range_units": 1.8,
+              "startup_f": 26,
+              "active_f": 5,
+              "recovery_f": 20,
+              "cooldown_s": 2.8,
+              "trigger": "阶段 2，与玩家攻击同步发动（镜像机制）",
+              "combo": "3 连击；出招节奏刻意与玩家攻击帧对齐，玩家须看预备动作而非听鼓点弹反",
+              "parryable": true,
+              "parry_note": "对击成功 → Boss 硬直 1.5 秒（本阶段主输出窗口）",
+              "status_effects_on_hit": ["knockback"],
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b2_sync_slash",
+              "name": "同步斩",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 25,
+              "range_units": 2.2,
+              "startup_f": 22,
+              "active_f": 6,
+              "recovery_f": 24,
+              "cooldown_s": 2.5,
+              "trigger": "阶段 2，穿插在镜像三连之间",
+              "parryable": true,
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b2_beat_lock",
+              "name": "鼓点追踪",
+              "attack_type": "ranged_projectile",
+              "damage_type": "projectile",
+              "damage": 25,
+              "range_units": 12.0,
+              "projectile": {
+                "speed_units_per_s": 8.0,
+                "homing": true,
+                "homing_turn_rate_deg_per_s": 90,
+                "lifespan_s": 3.0,
+                "note": "按鼓点频率连发 3 枚追踪弹，逼迫玩家边跑边打"
+              },
+              "startup_f": 30,
+              "active_f": 6,
+              "recovery_f": 28,
+              "cooldown_s": 5.0,
+              "trigger": "阶段 3",
+              "parryable": false,
+              "vulnerable_window_note": "锁定间隙 0.8 秒",
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b2_horn_wave",
+              "name": "号角冲击波",
+              "attack_type": "aoe",
+              "damage_type": "shockwave",
+              "damage": 35,
+              "range_units": 4.0,
+              "aoe_shape": "水平扇形冲击波",
+              "startup_f": 40,
+              "active_f": 8,
+              "recovery_f": 32,
+              "cooldown_s": 4.5,
+              "trigger": "阶段 3",
+              "parryable": false,
+              "counter_hint": "跳跃越过波面（波高 1.2 单位，source: new）",
+              "source": { "name": "design", "数值": "new" }
+            }
+          ]
+        },
+        "movement_mechanics": {
+          "movement_mode": "phase_teleport",
+          "pathfinding": "无寻路图；鼓楼场地为多层平台，Boss 可跳层追击（层间用跳跃演出，source: new）",
+          "chase_rule": "中速逼近；阶段 2 刻意贴中距离与玩家镜像对峙",
+          "retreat_rule": "召唤与大招后撤 2.0 单位",
+          "hit_feedback": {
+            "hit_stun_ms": 0,
+            "status_effects_ref": ["boss_phase_transition", "stun_parry"],
+            "knockback_resist": true
+          }
+        },
+        "phases": [
+          {
+            "phase": 1,
+            "hp_ratio": 0.4,
+            "tempo": "快板 140",
+            "mechanic_exam": "召唤梁山好汉阵型，玩家需破阵",
+            "attacks": ["b2_snake_summon", "b2_dragon_charge"],
+            "vulnerable_window": "阵型被击破后 2 秒"
+          },
+          {
+            "phase": 2,
+            "hp_ratio": 0.35,
+            "tempo": "快板 140",
+            "mechanic_exam": "镜像对击——与玩家同步出招，需看预备动作弹反（不看鼓点的节奏反转）",
+            "attacks": ["b2_mirror_triple", "b2_sync_slash"],
+            "vulnerable_window": "对击成功即硬直 1.5 秒"
+          },
+          {
+            "phase": 3,
+            "hp_ratio": 0.25,
+            "tempo": "极板 150",
+            "mechanic_exam": "以鼓点锁定玩家位置，需边跑边打",
+            "attacks": ["b2_beat_lock", "b2_horn_wave"],
+            "vulnerable_window": "锁定间隙 0.8 秒"
+          }
+        ],
+        "transition_rule": { "status_effect_ref": "boss_phase_transition", "duration_ms": 1500, "clear_projectiles": true },
+        "source": { "phases": "design" }
+      },
+
+      {
+        "id": "boss_mute_lord",
+        "name": "哑鼓之主（B3 · 终局 Boss）",
+        "type": "monster",
+        "category": "boss",
+        "threat": "高",
+        "first_appears": "关卡 12 赛段 12-3（普宁祖祠）",
+        "base_stats": {
+          "hp": 2400,
+          "atk": 38,
+          "def": 10,
+          "move_speed": { "chase_units_per_s": 4.0 },
+          "super_armor": true,
+          "damage_band": [25, 40],
+          "source": { "hp": "design", "atk": "new", "def": "new" }
+        },
+        "attack_mechanics": {
+          "attacks": [
+            {
+              "id": "b3_silent_strike",
+              "name": "无声突袭",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 30,
+              "range_units": 1.8,
+              "startup_f": 20,
+              "active_f": 5,
+              "recovery_f": 22,
+              "cooldown_s": 2.0,
+              "trigger": "阶段 1（静音阶段），快速近身抓取",
+              "parryable": true,
+              "telegraph_note": "静音阶段无鼓点提示，前摇改为纯视觉（爪光高亮），且判定窗口放宽至 ±120ms 补偿",
+              "status_effects_on_hit": ["knockback"],
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b3_silence_field",
+              "name": "沉默领域",
+              "attack_type": "special",
+              "damage_type": "special",
+              "damage": 0,
+              "range_units": 0,
+              "duration_ms": "阶段 1 全程（领域持续）",
+              "cast_duration_ms": 1500,
+              "cooldown_s": 0,
+              "trigger": "阶段 1 开始时释放，覆盖全场",
+              "effect_ref": "silence（状态效果表）",
+              "parryable": false,
+              "vulnerable_window_note": "沉默领域边缘 1.5 秒为领域维持间隙",
+              "source": "design"
+            },
+            {
+              "id": "b3_formation_combo",
+              "name": "四阵连击",
+              "attack_type": "melee",
+              "damage_type": "melee",
+              "damage": 32,
+              "range_units": 2.0,
+              "startup_f": 26,
+              "active_f": 6,
+              "recovery_f": 26,
+              "cooldown_s": 3.0,
+              "trigger": "阶段 2，随四阵轮转切换攻击模式（每阵 1 式）",
+              "combo": "按阵型轮换 4 式连击（长蛇突刺 / 双龙横扫 / 猛虎砸击 / 粉蝶旋斩）",
+              "parryable": true,
+              "status_effects_on_hit": ["knockback"],
+              "vulnerable_window_note": "每阵结束 1.5 秒",
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b3_drum_suppress",
+              "name": "鼓阵压制",
+              "attack_type": "aoe",
+              "damage_type": "shockwave",
+              "damage": 35,
+              "range_units": 4.5,
+              "aoe_shape": "全向地面冲击",
+              "startup_f": 44,
+              "active_f": 9,
+              "recovery_f": 36,
+              "cooldown_s": 5.0,
+              "trigger": "阶段 2",
+              "parryable": false,
+              "status_effects_on_hit": ["slow", "knockback"],
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b3_finale_fugue",
+              "name": "终焉合奏",
+              "attack_type": "aoe",
+              "damage_type": "shockwave",
+              "damage": 40,
+              "range_units": 6.0,
+              "aoe_shape": "全屏多段冲击（3 段，随鼓点）",
+              "startup_f": 60,
+              "active_f": 12,
+              "recovery_f": 45,
+              "cooldown_s": 8.0,
+              "trigger": "阶段 3（极板），高潮演出",
+              "parryable": false,
+              "telegraph": "号角长鸣 + 全场鼓面泛红，前摇 60 帧可读",
+              "status_effects_on_hit": ["knockback"],
+              "vulnerable_window_note": "合奏间隙 1 秒",
+              "source": { "name": "design", "数值": "new" }
+            },
+            {
+              "id": "b3_drum_tide",
+              "name": "鼓浪冲击",
+              "attack_type": "aoe",
+              "damage_type": "shockwave",
+              "damage": 35,
+              "range_units": 5.0,
+              "aoe_shape": "水平推进浪（宽 1.5 的行进波）",
+              "wave_speed_units_per_s": 7.0,
+              "startup_f": 36,
+              "active_f": 10,
+              "recovery_f": 30,
+              "cooldown_s": 4.0,
+              "trigger": "阶段 3",
+              "parryable": false,
+              "status_effects_on_hit": ["slow", "knockback"],
+              "note": "slow 状态的触发源之一；鼓励玩家以满堂彩反打（阶段 3 鼓劲获取翻倍）",
+              "source": { "name": "design", "数值": "new" }
+            }
+          ]
+        },
+        "movement_mechanics": {
+          "movement_mode": "phase_teleport",
+          "pathfinding": "无寻路图；祖祠场地为对称竞技场，Boss 居中控场",
+          "chase_rule": "高速逼近（4.0）；阶段 3 以鼓浪冲击替代贴身，远程压制",
+          "retreat_rule": "大招后撤 + 阶段转换清场重定位",
+          "hit_feedback": {
+            "hit_stun_ms": 0,
+            "status_effects_ref": ["boss_phase_transition", "stun_parry"],
+            "knockback_resist": true
+          }
+        },
+        "phases": [
+          {
+            "phase": 1,
+            "hp_ratio": 0.4,
+            "tempo": "静音（无 BGM）",
+            "mechanic_exam": "剥夺 BGM，靠灵蛇与鼓面图标判断节拍；判定窗口放宽至 ±120ms",
+            "attacks": ["b3_silent_strike", "b3_silence_field"],
+            "vulnerable_window": "沉默领域边缘 1.5 秒"
+          },
+          {
+            "phase": 2,
+            "hp_ratio": 0.35,
+            "tempo": "快板 140",
+            "mechanic_exam": "四阵轮转，综合检验全部机制",
+            "attacks": ["b3_formation_combo", "b3_drum_suppress"],
+            "vulnerable_window": "每阵结束 1.5 秒"
+          },
+          {
+            "phase": 3,
+            "hp_ratio": 0.25,
+            "tempo": "极板 150",
+            "mechanic_exam": "重夺鼓点，以满堂彩收束全场（本阶段玩家鼓劲获取 ×2）",
+            "attacks": ["b3_finale_fugue", "b3_drum_tide"],
+            "vulnerable_window": "合奏间隙 1 秒",
+            "special": "玩家鼓劲获取翻倍，鼓励以满堂彩终结"
+          }
+        ],
+        "transition_rule": { "status_effect_ref": "boss_phase_transition", "duration_ms": 1500, "clear_projectiles": true },
+        "source": { "phases": "design" }
+      }
+    ]
+  },
+
+  "design_rules_and_notes": {
+    "ai_principles": [
+      "敌人优先维持攻击节奏而非追身，保证玩家可预判",
+      "所有敌人攻击均有明确前摇动作，支持对击弹反（b3_silent_strike 等无鼓点场合前摇改为纯视觉提示）",
+      "同屏敌人攻击节奏错开，避免同时命中造成无解伤害"
+    ],
+    "enemy_placement_rules": [
+      "单个赛段内同屏敌人不超过 6 个",
+      "敌人不得与致命陷阱重叠布置，防止无解组合",
+      "枪手类敌人必须提供可绕行或可突进的路线",
+      "首次出现的敌人类型须在无陷阱环境中登场"
+    ],
+    "damage_reference": {
+      "player_hp": 100,
+      "normal_enemy_damage_range": [10, 25],
+      "boss_damage_range": [25, 40],
+      "design_rule": "普通敌人单次失误不致命；Boss 可承受 2–3 次失误"
+    },
+    "global_rules": [
+      "战斗动作与跑酷动作共用位移，攻击时不锁死移动（跑打无缝）",
+      "所有玩家攻击均可在抢步中发动，保证「边跑边打」成立",
+      "未合拍不打断连招、不影响取消窗口（合拍仅增益不设门槛）",
+      "死亡立即重开，单次重试成本 ≤ 3 秒"
+    ],
+    "open_items": [
+      { "id": "CAL-1", "issue": "本文件所有 source: \"new\" 的数值（def / range / cooldown / aggro / hit_stun / knockback）需在 M2-2 敌人扩展阶段实跑校准" },
+      { "id": "CAL-2", "issue": "满堂彩触发连段阈值：设计值 4，M0 数据表 streak_required=0（调试值），正式版需统一回写" },
+      { "id": "CAL-3", "issue": "盾兵 block_arc 120° 与转身速率 90°/s 需实测定稿，防止绕背过易或过难" },
+      { "id": "CAL-4", "issue": "对击失败惩罚 1.25 倍易伤为量化值，原设计仅表述「12 帧破绽」，需 A/B 测试验证" }
+    ]
+  }
+}

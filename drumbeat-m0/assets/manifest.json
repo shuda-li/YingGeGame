@@ -230,6 +230,26 @@
       "scale_1/": 6
     },
     {
+      "source": "跑动四帧.png（run_0 腿部镜像派生，tools/make_walk_frames.py）",
+      "output": "characters/player/run_4.png",
+      "category": "player",
+      "native_size": [706, 841],
+      "final_size": [117, 140],
+      "state": "run",
+      "frame": 4,
+      "scale_1/": 6
+    },
+    {
+      "source": "跑动四帧.png（run_2 腿部镜像派生，tools/make_walk_frames.py）",
+      "output": "characters/player/run_5.png",
+      "category": "player",
+      "native_size": [713, 891],
+      "final_size": [118, 148],
+      "state": "run",
+      "frame": 5,
+      "scale_1/": 6
+    },
+    {
       "source": "蓄力.jpeg",
       "output": "characters/player/charge.png",
       "category": "player",

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import ctypes
 import os
 import sys
 import time
@@ -41,6 +42,7 @@ class Game:
         pygame.init()
         pygame.display.set_caption("踏鼓 · Project Drumbeat — M0 原型")
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+        self._disable_ime()
         self.clock = pygame.time.Clock()
 
         self.bank = Bank()
@@ -82,6 +84,26 @@ class Game:
 
         self.feel_params = self._build_feel_params()
         self.log_path = os.path.join(app_dir(), "playtest_log.csv")
+
+    # ------------------------------------------------------------------ 输入环境
+    @staticmethod
+    def _disable_ime() -> None:
+        """对游戏窗口关闭中文输入法（IME）。
+
+        中文 IME 激活时，字母 / 空格 / 数字等按键会被组词窗口拦截，
+        游戏收不到任何 KEYDOWN，表现为"所有按键失效"。
+        游戏不需要文字输入：先停用 pygame 的文本输入，再把窗口的 IME
+        上下文解除关联（ImmAssociateContext(hwnd, None)）。
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            pygame.key.stop_text_input()
+            hwnd = pygame.display.get_wm_info().get("window")
+            if hwnd:
+                ctypes.WinDLL("imm32").ImmAssociateContext(hwnd, None)
+        except Exception as exc:
+            print(f"[warn] 关闭 IME 失败（不影响其他功能）：{exc}")
 
     # ------------------------------------------------------------------ 手感参数
     def _build_feel_params(self) -> list[FeelParam]:
