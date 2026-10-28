@@ -7,15 +7,39 @@
 """
 from __future__ import annotations
 
+import ctypes
 import os
+import sys
 
 import pygame
 
 from .config import asset_dir
 
+# Windows 下 SDL_image 按文件名动态加载 pygame 自带的 libpng/libjpeg 等 DLL，
+# 可能因 DLL 搜索路径受限而失败（报 Failed loading libpng16-16.dll），
+# 导致全部贴图加载失败并静默回退程序化绘制。
+# 这里在首次加载图片前，用绝对路径把自带 DLL 预加载进进程。
+if sys.platform == "win32":
+    try:
+        _DLL_DIR = os.path.dirname(pygame.__file__)
+        os.add_dll_directory(_DLL_DIR)
+        for _name in (
+            "zlib1.dll", "libpng16-16.dll", "libjpeg-62.dll", "libtiff-5.dll",
+            "libwebp-7.dll", "libwebpdemux-2.dll", "libwavpack-1.dll", "libxmp.dll",
+        ):
+            _path = os.path.join(_DLL_DIR, _name)
+            if os.path.isfile(_path):
+                try:
+                    ctypes.WinDLL(_path)
+                except OSError:
+                    pass
+    except Exception:
+        pass
+
 # 逻辑状态 → 素材文件名（按状态可多帧）
 PLAYER_FILES = {
-    "run": ["run_0.png", "run_1.png", "run_2.png", "run_3.png"],
+    "run": ["run_0.png", "run_1.png", "run_2.png", "run_3.png",
+            "run_4.png", "run_5.png"],
     "air": ["jump.png"],
     "attack": ["charge.png"],
     "death": ["death.png"],

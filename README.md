@@ -58,7 +58,7 @@ TRAE_WORK_data_YingGe/
 │  │  ├─ config.py              数据加载与全局常量
 │  │  └─ data/                  五张数据表（JSON）
 │  ├─ assets/                   像素素材（角色/敌人/环境/UI）
-│  │  ├─ characters/player/     玩家：run_0..3、charge、jump、death
+│  │  ├─ characters/player/     玩家：run_0..5（含左右腿交替帧）、charge、jump、death
 │  │  ├─ characters/enemy/      敌人：idle、walk、attack1、attack2、block、defeat_0..2
 │  │  ├─ environment/           天空、云朵、远景层、前景层、ground_tile、level_map
 │  │  ├─ ui/                    胜负结算图
@@ -128,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 - `J` —— 攻击（**合拍判定的锚点按键**）
 - `L` 或 `Shift` —— 抢步
 - `S` —— 矮子步（低姿通过悬空横梁）
-- `F` —— 满堂彩（鼓劲满且合拍连段 ≥4 时可用）
+- `F` —— 满堂彩（鼓劲满时可用）
 - `F1` —— 判定调试面板（Δt / 判定等级 / 连段 / BPM / 拍相位 / 音频延迟）
 - `F2` —— 手感参数面板（↑↓ 选择，←→ 调整，实时生效）
 - `F3` —— 显示/隐藏帮助
@@ -208,12 +208,12 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 ## 七、玩法系统摘要
 
-- **合拍判定**：按键帧锚点，完美 ±40ms / 合拍 ±80ms，由音频时钟驱动
+- **合拍判定**：按键帧锚点，完美 ±40ms / 合拍 ±200ms，由音频时钟驱动
 - **锣鼓板式**：慢板 90 / 中板 110 / 快板 140 / 极板 150 BPM，仅在小节边界换板
 - **运动手感**：固定步长 1/120s；疾行、腾跃、二段跳、抢步、矮子步
 - **帧数据战斗**：挥槌三段、凌空挥槌两段、劈山、对击；取消窗口在 recovery 后 40%
 - **对击弹反**：敌人命中前 100ms 内按攻击触发，成功硬直并加鼓劲
-- **鼓劲槽与满堂彩**：疾行、命中、合拍倍率、弹反叠加；满槽且连段 ≥4 释放
+- **鼓劲槽与满堂彩**：疾行、命中、合拍倍率、弹反叠加；满槽即可释放
 
 ---
 

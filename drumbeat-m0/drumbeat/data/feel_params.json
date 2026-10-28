@@ -33,7 +33,7 @@
   },
   "judgement": {
     "perfect_ms": 40,
-    "good_ms": 80,
+    "good_ms": 200,
     "assist_window_ms": 120,
     "mobile_extra_ms": 20,
     "anchor": "keydown",
@@ -53,6 +53,6 @@
     "finisher_invincible_ms": 1200,
     "finisher_speed": 14.0,
     "finisher_speed_ms": 5000,
-    "streak_required": 4
+    "streak_required": 0
   }
 }
