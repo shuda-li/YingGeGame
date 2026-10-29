@@ -54,6 +54,7 @@
 - 路径由 `asset_dir()`（config.py:24）决定：开发时 `drumbeat-m0/assets`，PyInstaller 打包后 `_MEIPASS/assets`。[确认]
 - 缺图回退：文件不存在或 `pygame.image.load` 失败时记录 `None` 并累加 `missing`，不抛异常；由 `hud.py` 改用程序化绘制（具体回退分支未读，标 [推测]）。[确认/推测]
 - 远景层（`far_1..4`）在 `_prep_layer` 中保留整幅画布的分支已实现（hud.py:142-145），但当前 `PARALLAX_LAYERS` 未启用远景层；T4-2 视觉验收未通过，保留中景。[确认]
+- L2 环境素材（2026-10-28 接入）：`far_L2.png`（黄昏整幅天空，走 `far*` 不裁剪分支）与 `level_map_L2.png`（骑楼街景，天空已从顶部泛洪抠除）登记为 `ENV_FILES["far_L2"/"mid_L2"]`；hud.py 新增 `PARALLAX_LAYERS_L2`，当关卡 JSON 含 `"env": "L2"` 时切换（`draw_world` 读取 `level.raw`，默认仍为 L1）。L2 关卡 JSON 与选关入口属 T2-6/7，未实现。[确认]
 - `manifest.json` 与 `_preview_*.png` 不参与运行时加载。[确认]
 
 ## 四、构建与打包

@@ -32,7 +32,13 @@ GROUND_SCREEN_Y = SCREEN_H * 0.76
 #   间距 None = 按自身宽度连续平铺
 PARALLAX_LAYERS = [
     ("cloud1", 0.06, 1.00, "top", 0.06, None),
+    ("far_new", 0.30, 0.50, "top", -0.50, None),
     ("mid", 0.55, 1.15, "ground", 0.35, None),
+]
+# L2「双龙出海」环境：far_L2 整幅暮色天空（走 far* 不裁剪分支）+ 抠天后的骑楼中景
+PARALLAX_LAYERS_L2 = [
+    ("far_L2", 0.30, 0.50, "top", -0.50, None),
+    ("mid_L2", 0.55, 0.39, "ground", 0.35, None),
 ]
 FOREGROUND_LAYER = ("fore", 1.35, 0.20, "top", 0.02, 760)
 
@@ -74,7 +80,8 @@ class Renderer:
     def draw_world(self, surf: pygame.Surface, level, player, combat) -> None:
         surf.fill((16, 14, 18))                       # 兜底底色：地平线以下与关卡范围外不留黑
         surf.blit(self._sky_surface(), (0, 0))
-        for cfg in PARALLAX_LAYERS:
+        layers = PARALLAX_LAYERS_L2 if getattr(level, "raw", {}).get("env") == "L2" else PARALLAX_LAYERS
+        for cfg in layers:
             self._blit_layer(surf, self._prep_layer(*cfg))
 
         self._draw_tiled_solids(surf, level.ground_rects + level.platform_rects)
