@@ -25,6 +25,7 @@ class InputFrame:
     held: dict[str, bool] = field(default_factory=dict)
     presses: list[Press] = field(default_factory=list)
     releases: list[str] = field(default_factory=list)
+    quit_requested: bool = False
 
     def just_pressed(self, action: str) -> bool:
         return any(p.action == action for p in self.presses)
@@ -84,7 +85,9 @@ class InputManager:
         return f
 
     def _handle(self, event: pygame.event.Event, f: InputFrame, t: float) -> None:
-        if event.type == pygame.KEYDOWN:
+        if event.type == pygame.QUIT:
+            f.quit_requested = True
+        elif event.type == pygame.KEYDOWN:
             action = _KEYMAP.get(event.key)
             if action:
                 self.last_device = "keyboard"

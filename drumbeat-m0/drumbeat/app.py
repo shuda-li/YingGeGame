@@ -41,6 +41,7 @@ class Game:
         pygame.init()
         pygame.display.set_caption("踏鼓 · Project Drumbeat — M0 原型")
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+        _disable_ime()
         self.clock = pygame.time.Clock()
 
         self.bank = Bank()
@@ -210,6 +211,8 @@ class Game:
 
     # ------------------------------------------------------------------ 输入
     def _global_keys(self, frame) -> bool:
+        if frame.quit_requested:        # 窗口右上角 ×
+            return True
         keys = pygame.key.get_pressed()
         if keys[pygame.K_ESCAPE]:
             return True
@@ -431,6 +434,8 @@ class Game:
         lines.append(f"判定锚点 {anchor}   用户偏移 {DATA.judgement['user_offset_ms']:+.0f}ms   完美/合拍窗口 {DATA.judgement['perfect_ms']:.0f}/{DATA.judgement['good_ms']:.0f}ms")
         lines.append(f"移速 {self.player.speed:4.1f}   鼓劲 {self.energy.value:5.1f}/100   槌花 {self.combat.hit_count}   满堂彩 {self.finisher_count}")
         lines.append(f"赛段进度 x={self.player.x:5.1f}/{self.level.goal_x:.0f}   敌人 {self.level.killed_enemies}/{self.level.total_enemies}")
+        held_now = sorted(a for a, v in self.inputs.frame.held.items() if v)
+        lines.append(f"当前按住: {'+'.join(held_now) if held_now else '（无）'}   （按键无反应时先看这里是否变化）")
         return lines
 
     # ------------------------------------------------------------------ 导出
@@ -463,6 +468,22 @@ class Game:
                   f"Δt均值 {st['mean_dt_ms']:+.1f}ms  标准差 {st['std_dt_ms']:.1f}ms")
         except Exception as exc:  # pragma: no cover
             print(f"[warn] 导出失败：{exc}")
+
+
+def _disable_ime() -> None:
+    """Windows 下对游戏窗口禁用输入法（IME）。
+
+    中文输入法激活时会拦截 A/D/W/S 等字母键（进入候选流程），pygame 收不到
+    KEYDOWN，表现为「窗口已聚焦但按键无反应」。将窗口 IME 上下文置空后按键直达。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        hwnd = pygame.display.get_wm_info()["window"]
+        ctypes.windll.imm32.ImmAssociateContext(hwnd, None)
+    except Exception:
+        pass
 
 
 def main() -> int:
