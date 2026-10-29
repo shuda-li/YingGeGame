@@ -61,6 +61,7 @@
 - 入口：`drumbeat-m0/drumbeat/app.py:168`（`InputManager.poll(audio_time)`）→ `app.py:265`（`Game._handle_input`）→ `app.py:323`（`Game._step`，固定 1/120s）
 - 核心类与方法：`InputManager`（inputs.py:56；`poll` L77、`_handle` L86、`set_frame_time` L142）；`InputFrame`（inputs.py:23；`just_pressed` L29、`first_press_time` L32）；`PlayerBody`（motion.py:43；`step` L134、`request_jump` L95、`request_dash` L98、`take_damage` L110、`respawn` L120）；`Game._handle_input`（app.py:265）
 - 输入入口：`_KEYMAP`（inputs.py:42）映射 A/D、空格、J、L/Shift、S、F；手柄按钮映射 `_PAD_BUTTONS`（inputs.py:53）；攻击用 `first_press_time("attack")` 取按键发生瞬间的音频时间戳。[确认]
+- IME 防护：Windows 下 `Game.__init__` 调用 `_disable_ime()`（app.py:471），对窗口 `ImmAssociateContext(hwnd, None)` 禁用输入法，避免中文 IME 吞掉字母键导致 WASD 无反应；调试面板（F1）末行显示当前 `held` 按键，用于区分「按键未到达」与「角色未动」。[确认]
 - 状态变化：无独立玩家状态机，由字段隐式表达——`on_ground`/`sliding`（高 0.9，400ms）/`dash_t`+`invincible_t`（250ms，200ms 无敌）/`jumps_used`（二段跳）/`dead`+`hp`；死亡后 `Game.state="dead"`，1.5s 自动 `restart(full=True)`。[确认]
 - 数据流：pygame 事件 → `InputManager.poll(t)` → `InputFrame.held/presses` → `_handle_input`（跳/抢步/攻击/矮子步/满堂彩）→ `PlayerBody.step` 与 `PlayerCombat` → 渲染。[确认]
 - 扩展点：新增按键改 `_KEYMAP`；新增角色动作需同时改 `motion.py` 与 `hud.py`（表现层未读，见 U-06）；手感改 `data/feel_params.json` 的 `motion`/`assist`。[确认/推测]
