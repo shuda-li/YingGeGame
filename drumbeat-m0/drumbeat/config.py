@@ -13,6 +13,10 @@ FRAME_MS = 1000.0 / REFERENCE_FPS
 SCREEN_W = 1280
 SCREEN_H = 720
 
+# 玩法模式开关："PATAPON" 阵列指挥（J/K/L/S 四拍指令，默认）/ "CLASSIC" 单角色跑打（M0 原模式）。
+# 回滚对比：设环境变量 DRUMBEAT_MODE=CLASSIC，或把此处默认值改回 "CLASSIC"。
+MODE = os.environ.get("DRUMBEAT_MODE", "PATAPON").upper()
+
 
 def data_dir() -> str:
     if getattr(sys, "frozen", False):

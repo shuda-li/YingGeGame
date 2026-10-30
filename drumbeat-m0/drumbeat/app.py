@@ -10,9 +10,9 @@ import pygame
 
 from .audio import AudioEngine, NullAudioEngine
 from .combat import PlayerCombat
-from .config import DATA, FIXED_DT, SCREEN_H, SCREEN_W, app_dir
+from .config import DATA, FIXED_DT, MODE, SCREEN_H, SCREEN_W, app_dir
 from .energy import DrumEnergy
-from .hud import GOLD, GREY, RED, WHITE, Renderer
+from .hud import GOLD, GREY, RED, WHITE, Renderer, SquadView
 from .inputs import InputManager
 from .judgement import Judgement
 from .level import Level
@@ -39,7 +39,8 @@ class FeelParam:
 class Game:
     def __init__(self) -> None:
         pygame.init()
-        pygame.display.set_caption("踏鼓 · Project Drumbeat — M0 原型")
+        pygame.display.set_caption(
+            f"踏鼓 · Project Drumbeat — {'Patapon 阵列指挥' if MODE == 'PATAPON' else 'M0 原型'}")
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
         _disable_ime()
         self.clock = pygame.time.Clock()
@@ -52,37 +53,44 @@ class Game:
             self.audio = NullAudioEngine()
             self.audio.start()
 
-        self.renderer = Renderer()
-        self.inputs = InputManager()
-        self.level = Level()
-        self.music = MusicDirector(self.audio, self.bank)
-        self.judgement = Judgement(self.music)
-        self.energy = DrumEnergy()
-        self.player = PlayerBody(self.level)
-        self.combat = PlayerCombat(self.judgement, self.energy)
-        self.judgement._flash = (0.0, "perfect")
-
-        self.elapsed = 0.0
-        self.hitstop_t = 0.0
-        self.acc = 0.0
-        self.state = "playing"      # playing / dead / cleared
-        self.death_t = 0.0
-        self.paused = False
-        self.show_debug = False
-        self.show_feel = False
-        self.feel_sel = 0
-        self.show_help = True
         self.fps = 0.0
-        self.poll_hz = 0.0
-        self._poll_count = 0
-        self._poll_window_t = time.perf_counter()
-        self.message = ""
-        self.message_t = 0.0
-        self.runs = 0
-        self.finisher_count = 0
+        if MODE == "PATAPON":
+            # 阵列指挥模式：J/K/L/S 四拍指令（squad.PataponGame 编排 + hud.SquadView 渲染）
+            from .squad import PataponGame
+            self.squad_view = SquadView()
+            self.patapon = PataponGame(self.audio, self.bank, self.squad_view)
+        else:
+            # ---------------- CLASSIC 单角色跑打（M0 原模式，完整保留供回滚对比） ----------------
+            self.renderer = Renderer()
+            self.inputs = InputManager()
+            self.level = Level()
+            self.music = MusicDirector(self.audio, self.bank)
+            self.judgement = Judgement(self.music)
+            self.energy = DrumEnergy()
+            self.player = PlayerBody(self.level)
+            self.combat = PlayerCombat(self.judgement, self.energy)
+            self.judgement._flash = (0.0, "perfect")
 
-        self.feel_params = self._build_feel_params()
-        self.log_path = os.path.join(app_dir(), "playtest_log.csv")
+            self.elapsed = 0.0
+            self.hitstop_t = 0.0
+            self.acc = 0.0
+            self.state = "playing"      # playing / dead / cleared
+            self.death_t = 0.0
+            self.paused = False
+            self.show_debug = False
+            self.show_feel = False
+            self.feel_sel = 0
+            self.show_help = True
+            self.poll_hz = 0.0
+            self._poll_count = 0
+            self._poll_window_t = time.perf_counter()
+            self.message = ""
+            self.message_t = 0.0
+            self.runs = 0
+            self.finisher_count = 0
+
+            self.feel_params = self._build_feel_params()
+            self.log_path = os.path.join(app_dir(), "playtest_log.csv")
 
     # ------------------------------------------------------------------ 手感参数
     def _build_feel_params(self) -> list[FeelParam]:
@@ -166,48 +174,78 @@ class Game:
         while running:
             real_dt = self.clock.tick(240) / 1000.0
             self.fps = self.clock.get_fps()
-            t = self.audio.audio_time()
 
-            self.inputs.set_frame_time(t)
-            frame = self.inputs.poll(t)
-            self._poll_count += 1
-            now_perf = time.perf_counter()
-            if now_perf - self._poll_window_t >= 0.5:
-                self.poll_hz = self._poll_count / (now_perf - self._poll_window_t)
-                self._poll_count = 0
-                self._poll_window_t = now_perf
+            if MODE == "PATAPON":
+                running = self._patapon_frame(real_dt)
+            else:
+                # ---------------- CLASSIC 单角色跑打（原循环逐行保留） ----------------
+                t = self.audio.audio_time()
 
-            if self._global_keys(frame):
-                running = False
-                break
+                self.inputs.set_frame_time(t)
+                frame = self.inputs.poll(t)
+                self._poll_count += 1
+                now_perf = time.perf_counter()
+                if now_perf - self._poll_window_t >= 0.5:
+                    self.poll_hz = self._poll_count / (now_perf - self._poll_window_t)
+                    self._poll_count = 0
+                    self._poll_window_t = now_perf
 
-            if not self.paused:
-                self._handle_input(frame, t)
-                if self.state == "playing":
-                    self.acc += real_dt
-                    steps = 0
-                    while self.acc >= FIXED_DT and steps < 8:
-                        self._step(FIXED_DT, t)
-                        self.acc -= FIXED_DT
-                        steps += 1
-                    if steps >= 8:
-                        self.acc = 0.0
-                elif self.state == "dead":
-                    self.death_t += real_dt
-                    if self.death_t >= 1.5:
-                        self.restart(full=True)
+                if self._global_keys(frame):
+                    running = False
+                    break
 
-            self._update_flash(real_dt)
-            self._render(t)
+                if not self.paused:
+                    self._handle_input(frame, t)
+                    if self.state == "playing":
+                        self.acc += real_dt
+                        steps = 0
+                        while self.acc >= FIXED_DT and steps < 8:
+                            self._step(FIXED_DT, t)
+                            self.acc -= FIXED_DT
+                            steps += 1
+                        if steps >= 8:
+                            self.acc = 0.0
+                    elif self.state == "dead":
+                        self.death_t += real_dt
+                        if self.death_t >= 1.5:
+                            self.restart(full=True)
+
+                self._update_flash(real_dt)
+                self._render(t)
+
             pygame.display.flip()
 
             frame_i += 1
             if smoke_frames and frame_i >= smoke_frames:
                 running = False
 
-        self._export_log()
+        if MODE == "PATAPON":
+            st = self.patapon.stats
+            total = max(1, st["perfect"] + st["good"] + st["off"])
+            print(f"[patapon] 指令成功 {st['cmd_ok']}  失误 {st['cmd_fail']}  攻击 {st['attacks']}  "
+                  f"击杀 {self.patapon.kills}  破阵 {st['break_ok']}/{st['break_fail']}  "
+                  f"完美 {st['perfect'] / total * 100:.0f}%  合拍 {st['good'] / total * 100:.0f}%  "
+                  f"未合拍 {st['off'] / total * 100:.0f}%  状态 {self.patapon.status}")
+        else:
+            self._export_log()
         self.audio.stop()
         pygame.quit()
+
+    def _patapon_frame(self, real_dt: float) -> bool:
+        """PATAPON 阵列模式单帧：事件 → 编排推进 → 阵列渲染。返回 False 表示退出。
+
+        注意：本路径不经过 InputManager/Judgement——鼓键事件在此直接进
+        squad.PataponGame 的 4 拍缓冲池，判定走 sandbox_patapon 的平行路径。
+        """
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                return False
+            if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                return False
+            self.patapon.handle_event(ev)
+        self.patapon.update(real_dt)
+        self.squad_view.draw(self.screen, self.patapon, real_dt, self.fps)
+        return True
 
     # ------------------------------------------------------------------ 输入
     def _global_keys(self, frame) -> bool:

@@ -6,11 +6,14 @@ M1 改造：M1-2 接入像素素材（缺图回退程序绘制）、M1-4 接入�
 from __future__ import annotations
 
 import math
+import random
+import sys
 
 import pygame
 
 from .assets import Assets
-from .config import DATA, PIXELS_PER_UNIT, SCREEN_H, SCREEN_W
+from .config import DATA, PIXELS_PER_UNIT, SCREEN_H, SCREEN_W, app_dir
+from .squad import MORPH_STAGGER, MORPH_WINDOW, N_UNITS     # 变阵参数/人数的单一事实源在逻辑层
 
 # 英歌脸谱配色：红 / 黑 / 白 / 金
 RED = (200, 16, 46)
@@ -439,3 +442,226 @@ class Renderer:
         for i, ln in enumerate(lines):
             s = self.font_s.render(ln, True, GREY)
             surf.blit(s, (16, 150 + i * 20))
+
+
+# ================================================================== Patapon 阵列渲染系统
+# 与上方单角色渲染（Renderer）并存，由 config.MODE 切换：PATAPON 模式走 SquadView，
+# CLASSIC 模式仍走 Renderer（逐行保留，供回滚对比）。
+# 视觉内核复用工程根目录 advanced_squad_renderer.py（沙盒已验证：变阵插值 / 震屏 /
+# 火花 / 残影 / 满堂彩 / 铁壁姿态），本类负责装配与阵列 HUD（输入槽 / 横幅 / 进度 / 结算）。
+FORMATION_NAMES = {"changshe": "长蛇阵", "tiebi": "铁壁阵", "menghu": "猛虎阵"}
+PHASE_NAMES = {"input": "输入·请击鼓", "echo": "应答唱和", "execute": "执行", "luan": "乱阵"}
+GRADE_COLORS = {"perfect": (90, 255, 130), "good": (255, 220, 90), "off": (255, 85, 70)}
+CMD_HINT = "JJJJ 猛虎下山 · KKKK 长蛇突进 · LLLL 铁壁防守 · KLKL 变阵"
+SQUAD_ANCHOR_X = 400            # 队伍锚点屏幕 x（与沙盒 300/960 等比 → 1280 宽）
+SQUAD_N = N_UNITS               # 编队人数
+
+
+class SquadView:
+    """Patapon 阵列模式视图层。逻辑状态由 squad.PataponGame 持有，本类只读不写。"""
+
+    def __init__(self) -> None:
+        root = app_dir()
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        import advanced_squad_renderer as sr      # 工程根目录的可视化沙盒内核
+        self._sr = sr
+        self.core = sr.AdvancedSquadRenderer((SCREEN_W, SCREEN_H))
+        self.font_s = load_font(16)
+        self.font_m = load_font(24)
+        self.font_xl = load_font(44)
+        self.utypes = ["chui"] * 4 + ["luo"] * 2 + ["dun"] * 2
+        self._flash_steps = []                    # 乱阵红闪：预烘焙多级透明度，渲染零 set_alpha
+        for i in range(1, 7):
+            s = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            s.fill((200, 30, 30, int(105 * i / 6)))
+            self._flash_steps.append(s)
+        self.reset()
+
+    # ------------------------------------------------------------------ 装配与钩子
+    def reset(self) -> None:
+        sr = self._sr
+        self.formation = "changshe"
+        self.lerp = sr.FormationLerp(sr.FORMATION_SLOTS[self.formation](SQUAD_N),
+                                     stagger=MORPH_STAGGER, window=MORPH_WINDOW)
+        self.scatter = [[0.0, 0.0] for _ in range(SQUAD_N)]
+        self.luan_flash = 0.0
+        self.hurt_flash = 0.0                   # S5 队伍受击红闪
+        self.core.trail = sr.AfterimageTrail()
+        self.core.sparks = sr.SparkPool()
+
+    def morph_to_key(self, key: str) -> None:
+        self.formation = key
+        self.lerp.morph_to(self._sr.FORMATION_SLOTS[key](SQUAD_N))
+
+    def front_x(self) -> float:
+        slots = self._sr.FORMATION_SLOTS[self.formation](SQUAD_N)
+        return SQUAD_ANCHOR_X + max(x for x, _ in slots) + 46
+
+    def world_sx(self, wx: float, anchor_wx: float) -> float:
+        """世界坐标 → 屏幕 x（与渲染器地面刻度同一变换）。"""
+        return SQUAD_ANCHOR_X + (wx - anchor_wx) * self._sr.PX_PER_UNIT
+
+    def on_attack(self, x: float, perfect: bool) -> None:
+        self.core.on_attack(x, self.core.ground_y - 30, perfect=perfect)
+
+    def on_enemy_hit(self, wx: float, killed: bool, anchor_wx: float) -> None:
+        """S5 命中反馈：敌人位置火花；击杀加震屏。"""
+        sx = self.world_sx(wx, anchor_wx)
+        self.core.sparks.burst(sx, self.core.ground_y - 20,
+                               n=14 if killed else 6, color=(255, 120, 90))
+        if killed:
+            self.core.shake.add(0.35)
+
+    def on_squad_hit(self) -> None:
+        """S5 队伍受击：红闪 + 震屏。"""
+        self.hurt_flash = 0.5
+        self.core.shake.add(0.6)
+
+    def on_boss_break(self, wx: float, ok: bool, anchor_wx: float) -> None:
+        """S5 破阵结算：Boss 位置大火花（成功金色 / 失败暗红）。"""
+        sx = self.world_sx(wx, anchor_wx)
+        self.core.sparks.burst(sx, self.core.ground_y - 60,
+                               n=26 if ok else 12,
+                               color=(255, 210, 90) if ok else (160, 40, 40))
+        self.core.shake.add(0.7 if ok else 0.4)
+
+    def trigger_luan(self) -> None:
+        rng = random.Random()
+        for s in self.scatter:                    # 散射（draw 中指数衰减归位）
+            s[0] = rng.uniform(-30.0, 30.0)
+            s[1] = rng.uniform(-22.0, 8.0)
+        self.luan_flash = 1.0
+        self.core.shake.add(0.85)
+
+    # ------------------------------------------------------------------ 帧绘制
+    def draw(self, surf: pygame.Surface, game, dt: float, fps: float = 0.0) -> None:
+        self.lerp.now += dt
+        damp = math.exp(-6.0 * dt)
+        for s in self.scatter:
+            s[0] *= damp
+            s[1] *= damp
+        self.luan_flash = max(0.0, self.luan_flash - dt * 1.4)
+        self.hurt_flash = max(0.0, self.hurt_flash - dt * 2.0)
+
+        positions = [(ox + s[0], oy + s[1]) for (ox, oy), s in zip(self.lerp.positions(), self.scatter)]
+        idx = list(range(SQUAD_N))
+        if game.phase == "luan":                  # 乱阵闪烁：逐帧抽半数单位
+            idx = [i for i in idx if (int(self.core.now * 12) + i) % 2 == 0]
+        beat = game.beat
+        # S5 敌人 / Boss 渲染数据（世界坐标直传，渲染器内部做滚屏变换）
+        enemies = [(e.x, e.hp / e.max_hp, min(1.0, e.flash / 0.15))
+                   for e in game.enemies if not e.dead]
+        boss = None
+        if game.boss is not None and not game.boss.dead:
+            boss = (game.boss.x, game.boss.hp / game.boss.max_hp, game.boss.state)
+        self.core.render(surf,
+                         [positions[i] for i in idx], [self.utypes[i] for i in idx],
+                         anchor=(SQUAD_ANCHOR_X, self.core.ground_y), beat=beat, bpm=game.bpm,
+                         fever=game.fever, dashing=beat < game.stride_until,
+                         attack_beat=game.attack_beat, dt=dt,
+                         defend=beat < game.defend_until, world_x=game.anchor.x,
+                         enemies=enemies, boss=boss)
+
+        if self.luan_flash > 0.0:
+            surf.blit(self._flash_steps[min(5, int(self.luan_flash * 6))], (0, 0))
+        elif self.hurt_flash > 0.0:
+            surf.blit(self._flash_steps[min(5, int(self.hurt_flash * 4))], (0, 0))
+        self._draw_hud(surf, game, fps)
+
+    # ------------------------------------------------------------------ 阵列 HUD
+    def _draw_hud(self, surf: pygame.Surface, game, fps: float) -> None:
+        info = (f"{game.layer_name} {game.bpm:.0f} BPM   阵型 {FORMATION_NAMES[self.formation]}   "
+                f"相位 {PHASE_NAMES[game.phase]}   连Perfect {game.perfect_streak}   "
+                f"满堂彩 {'ON' if game.fever else 'off'}   FPS {fps:.0f}")
+        surf.blit(self.font_s.render(info, True, WHITE), (12, 10))
+        surf.blit(self.font_s.render(CMD_HINT + "   [R]重开 [P]暂停 [F3]帮助 [Esc]退出", True, GREY), (12, 32))
+
+        # 赛段进度（世界锚点 → 收阵点）
+        prog = max(0.0, min(1.0, game.anchor.x / game.goal_units))
+        pygame.draw.rect(surf, (40, 40, 44), pygame.Rect(12, 56, 240, 8), border_radius=3)
+        pygame.draw.rect(surf, GOLD, pygame.Rect(12, 56, int(240 * prog), 8), border_radius=3)
+
+        # S5 队伍 HP + 击杀 / 解锁
+        hp_ratio = max(0.0, game.squad_hp / 100.0)
+        pygame.draw.rect(surf, (40, 36, 40), pygame.Rect(12, 70, 240, 8), border_radius=3)
+        pygame.draw.rect(surf, RED, pygame.Rect(12, 70, int(240 * hp_ratio), 8), border_radius=3)
+        unlocked_txt = " / ".join(FORMATION_NAMES[f] for f in
+                                  ("changshe", "tiebi", "menghu") if f in game.unlocked)
+        surf.blit(self.font_s.render(
+            f"队伍HP {game.squad_hp:.0f}   击杀 {game.kills}   已解锁 {unlocked_txt}",
+            True, GREY), (12, 84))
+
+        # S5 Boss 血条（顶部居中，预警/交战中显示）
+        if game.boss is not None and not game.boss.dead and game.boss.state != "idle":
+            bw = 420
+            bx = SCREEN_W // 2 - bw // 2
+            pygame.draw.rect(surf, (40, 36, 40), pygame.Rect(bx, 44, bw, 12), border_radius=4)
+            pygame.draw.rect(surf, (200, 50, 40),
+                             pygame.Rect(bx, 44, int(bw * game.boss.hp / game.boss.max_hp), 12),
+                             border_radius=4)
+            t = self.font_s.render("渠魁 · 破阵窗口 = 铁壁阵 + 阵型齐整", True, (255, 160, 140))
+            surf.blit(t, t.get_rect(center=(SCREEN_W // 2, 64)))
+
+        # 4 拍输入槽：圈 = 拍点（输入小节随拍相位脉冲），敲入后显示按键 + 评级色
+        slots = game.commander.presses if game.phase == "input" else game.hud_presses
+        bib = game.beat % DATA.bar_beats
+        for i in range(DATA.bar_beats):
+            cx = SCREEN_W // 2 - 90 + i * 60
+            cy = SCREEN_H - 54
+            pulse = max(0.0, 1.0 - abs(bib - i) * 2.0) if game.phase == "input" else 0.0
+            pygame.draw.circle(surf, (66, 62, 78), (cx, cy), 16)
+            pygame.draw.circle(surf, (240, 210, 120) if pulse > 0.3 else (110, 106, 125),
+                               (cx, cy), 16 + int(3 * pulse), 2)
+            if i < len(slots):
+                k, g, _, _ = slots[i]
+                pygame.draw.circle(surf, GRADE_COLORS[g], (cx, cy), 12)
+                t = self.font_s.render(k, True, (12, 12, 16))
+                surf.blit(t, t.get_rect(center=(cx, cy)))
+            else:
+                t = self.font_s.render(str(i + 1), True, (96, 92, 110))
+                surf.blit(t, t.get_rect(center=(cx, cy)))
+
+        if game.last_grade[1] > 0.0 and game.last_grade[0]:
+            col = GRADE_COLORS.get(game.last_grade[0].rstrip("!").lower(), WHITE)
+            t = self.font_m.render(game.last_grade[0], True, col)
+            surf.blit(t, t.get_rect(center=(SCREEN_W // 2, SCREEN_H - 96)))
+        if game.banner[1] > 0.0 and game.banner[0]:
+            col = (255, 92, 72) if "乱" in game.banner[0] else (255, 220, 90)
+            t = self.font_xl.render(game.banner[0], True, col)
+            surf.blit(t, t.get_rect(center=(SCREEN_W // 2, 118)))
+
+        if game.status == "cleared":
+            st = game.stats
+            total = max(1, st["perfect"] + st["good"] + st["off"])
+            self._center(surf, "收 阵", GOLD)
+            lines = [f"指令成功 {st['cmd_ok']}   失误 {st['cmd_fail']}   攻击 {st['attacks']}   "
+                     f"击杀 {game.kills}   破阵 {st['break_ok']}",
+                     f"完美 {st['perfect'] / total * 100:.0f}%   合拍 {st['good'] / total * 100:.0f}%   "
+                     f"未合拍 {st['off'] / total * 100:.0f}%",
+                     "按 R 重开"]
+            for i, ln in enumerate(lines):
+                s = self.font_s.render(ln, True, WHITE)
+                surf.blit(s, (SCREEN_W // 2 - s.get_width() // 2, SCREEN_H // 2 + 10 + i * 24))
+        elif game.status == "defeated":
+            st = game.stats
+            self._center(surf, "全 军 覆 灭", (255, 92, 72))
+            lines = [f"击杀 {game.kills}   破阵 {st['break_ok']}   被破 {st['break_fail']}",
+                     "按 R 重开"]
+            for i, ln in enumerate(lines):
+                s = self.font_s.render(ln, True, WHITE)
+                surf.blit(s, (SCREEN_W // 2 - s.get_width() // 2, SCREEN_H // 2 + 10 + i * 24))
+        elif game.paused:
+            self._center(surf, "暂 停", GREY)
+        elif game.show_help:
+            for i, ln in enumerate([
+                    "J/K/L/S 击鼓：输入小节内连续敲出 4 拍组合并踩准鼓点（±40ms 完美 / ±80ms 合拍）",
+                    "JJJJ 猛虎下山 · KKKK 长蛇突进 · LLLL 铁壁防守 · KLKL 变阵；敲错或脱拍会乱阵一小节",
+                    "击杀 5 敌解锁铁壁阵、12 敌解锁猛虎阵；长蛇穿透 · 猛虎溅射 · 铁壁减伤免击退",
+                    "渠魁拦路时站好【铁壁阵】且阵型齐整才能破阵；连续 2 小节全 PERFECT 触发满堂彩"]):
+                s = self.font_s.render(ln, True, GREY)
+                surf.blit(s, (16, 150 + i * 20))
+
+    def _center(self, surf: pygame.Surface, text: str, color) -> None:
+        t = self.font_xl.render(text, True, color)
+        surf.blit(t, (SCREEN_W // 2 - t.get_width() // 2, SCREEN_H // 2 - 60))
