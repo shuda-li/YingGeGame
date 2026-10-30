@@ -200,8 +200,8 @@
     ],
     "windows": [
       { "grade": "完美合拍", "id": "perfect", "tolerance_ms": 40, "description": "偏差在 ±40ms 内" },
-      { "grade": "合拍", "id": "good", "tolerance_ms": 80, "description": "偏差在 ±40ms 至 ±80ms 之间" },
-      { "grade": "未合拍", "id": "off", "tolerance_ms": null, "description": "偏差超过 ±80ms" }
+      { "grade": "合拍", "id": "good", "tolerance_ms": 200, "description": "偏差在 ±40ms 至 ±200ms 之间" },
+      { "grade": "未合拍", "id": "off", "tolerance_ms": null, "description": "偏差超过 ±200ms" }
     ],
     "latency_calibration": {
       "user_offset_range_ms": { "min": -150, "max": 150 },
@@ -242,7 +242,6 @@
       "reset_condition": "出现一次未合拍即归零",
       "no_extra_penalty": "未合拍不扣鼓劲、不打断连招、不影响取消窗口",
       "tiers": [
-        { "streak": 4, "reward": "满堂彩就绪（终结技可释放）" },
         { "streak": 8, "reward": "满堂彩伤害 +10%" },
         { "streak": 12, "reward": "满堂彩伤害 +20%，触发全场锣鼓齐鸣演出" },
         { "streak": 16, "reward": "满堂彩伤害 +30%（上限），结算额外评分加成" }

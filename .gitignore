@@ -15,6 +15,14 @@ crash.log
 tools/node_modules/
 node_modules/
 
+# ---------- Python 虚拟环境 ----------
+.venv/
+venv/
+**/.venv/
+
+# ---------- WorkBuddy 工作记忆 ----------
+.workbuddy/
+
 # ---------- 原始素材包（约 52.7 MB）----------
 # 原始 AI 素材包（品红底，需处理），与 drumbeat-m0/assets/ 的成品并存，
 # 便于队友重新抠图/分帧；处理规则见 README「美术素材 → 抠图规则」。

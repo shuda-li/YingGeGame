@@ -27,7 +27,7 @@
 | 迟滞 / hysteresis | 换板速度阈值附近的回差，避免频繁切换（0.5 单位/秒） | `tempo_layers.json`、`tempo.py:28` |
 | 前瞻调度 / lookahead | 鼓点事件提前约 200ms 排入音频队列 | `tempo.py:19,143` |
 | Δt / `dt_ms` | 按键音频时间与最近判定点的差值（毫秒） | `judgement.py:70` |
-| perfect / good / off | 判定等级：完美 ±40ms、合拍 ±80ms、其余未合拍 | `judgement.py:72-77` |
+| perfect / good / off | 判定等级：完美 ±40ms、合拍 ±200ms、其余未合拍 | `judgement.py:72-77` |
 | 辅助窗口 | `assist_window_ms=120`，辅助模式下的合拍窗口 | `feel_params.json`、`judgement.py:50` |
 | 按键帧锚点 / `keydown` | 按键发生的音频时刻即为判定时刻（默认） | `judgement.py:5`、ADR-001 |
 | 命中帧锚点 / `active_frame` | 以攻击 active 阶段为判定时刻（可选 A/B） | `combat.py:99-102,190-194` |
@@ -54,7 +54,7 @@
 | 槌花 / `hit_count` | 短时间内的命中计数，2s 无命中清零 | `combat.py:37`、`feel_params.json` |
 | 合拍连段 / `streak` | 连续 perfect/good 次数；off 清零 | `judgement.py:79-83` |
 | 鼓劲 / `DrumEnergy` | 疾行、命中、弹反积累的能量槽，满 100 | `energy.py`、`feel_params.json` |
-| 满堂彩 / finisher | 鼓劲满且连段 ≥4 的范围终结技 | `energy.can_finish`、`combat.release_finisher` |
+| 满堂彩 / finisher | 鼓劲满即可释放的范围终结技 | `energy.can_finish`、`combat.release_finisher` |
 
 ## 四、类与模块
 
