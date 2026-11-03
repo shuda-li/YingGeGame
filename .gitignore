@@ -34,3 +34,10 @@ Desktop.ini
 # Office 临时文件（Word 打开 docx 时生成的锁文件等）
 ~$*
 *.tmp
+
+# ---------- 环境与缓存（2026-11-03 目录扁平化后新增）----------
+.venv/
+.vscode/
+.wheel_cache/
+art-out/
+.screenshots/
