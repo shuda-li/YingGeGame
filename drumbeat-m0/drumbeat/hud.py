@@ -501,3 +501,120 @@ class Renderer:
         for i, ln in enumerate(lines):
             s = self.font_s.render(ln, True, GREY)
             surf.blit(s, (16, 150 + i * 20))
+
+    # ------------------------------------------------------------------ 主菜单
+    def draw_menu(self, surf, index: int, items: list[str], t: float) -> None:
+        """绘制主菜单：标题 + 竖向菜单项 + 鼓点呼吸的选框。
+
+        index 为当前选中项；t 为运行时间（秒），用于动画相位。
+        """
+        # 背景：墨色打底，向中心轻微提亮，制造舞台聚焦感
+        base = pygame.Surface((SCREEN_W, SCREEN_H))
+        cx, cy = SCREEN_W // 2, SCREEN_H // 2
+        for y in range(SCREEN_H):
+            d = abs(y - cy) / cy
+            col = self._lerp((24, 22, 26), (8, 8, 10), max(0.0, min(1.0, d)))
+            pygame.draw.line(base, col, (0, y), (SCREEN_W, y))
+        surf.blit(base, (0, 0))
+
+        # 舞台地面：底部一条红金横带，作为标题与菜单的视觉落点
+        pygame.draw.rect(surf, (40, 20, 22), pygame.Rect(0, int(SCREEN_H * 0.80), SCREEN_W, int(SCREEN_H * 0.20)))
+        pygame.draw.rect(surf, RED, pygame.Rect(0, int(SCREEN_H * 0.80), SCREEN_W, 4))
+
+        # 标题：优先用像素字图；缺图时回退到程序渲染文字
+        sub = "· Project Drumbeat ·  潮汕英歌舞"
+        title_bottom = 0
+        title_img = self.assets.ui("title")
+        if title_img is not None:
+            # 缩放到合适尺寸（保持像素风格，最近邻放大）
+            tw = int(title_img.get_width() * 1.7)
+            th = int(title_img.get_height() * 1.7)
+            title_img = self.assets.scaled(title_img, tw, th)
+            ty = int(SCREEN_H * 0.10)
+            surf.blit(title_img, (cx - title_img.get_width() // 2, ty))
+            title_bottom = ty + title_img.get_height()
+        else:
+            title = "踏   鼓"
+            for dy in range(2, 5):
+                ts = self.font_xl.render(title, True, (40, 6, 10))
+                surf.blit(ts, (cx - ts.get_width() // 2 + dy, int(SCREEN_H * 0.18) + dy))
+            ts = self.font_xl.render(title, True, RED)
+            surf.blit(ts, (cx - ts.get_width() // 2, int(SCREEN_H * 0.18)))
+            title_bottom = int(SCREEN_H * 0.18) + ts.get_height()
+
+        # 副标题（紧贴标题下方）
+        sub_y = title_bottom + 4
+        ss = self.font_s.render(sub, True, GOLD)
+        surf.blit(ss, (cx - ss.get_width() // 2, sub_y))
+
+        # 标题下装饰横线（红金双线）
+        deco_w = 320
+        deco_y = sub_y + ss.get_height() + 6
+        pygame.draw.line(surf, GOLD, (cx - deco_w // 2, deco_y), (cx + deco_w // 2, deco_y), 2)
+        pygame.draw.line(surf, RED, (cx - deco_w // 2, deco_y + 6), (cx + deco_w // 2, deco_y + 6), 2)
+
+        # 菜单项：竖向排列，选中项金色放大 + 左侧鼓点呼吸标记
+        start_y = int(SCREEN_H * 0.55)
+        gap = 46
+        for i, name in enumerate(items):
+            y = start_y + i * gap
+            sel = (i == index)
+            font = self.font_l if sel else self.font_m
+            color = GOLD if sel else WHITE
+            # 选中的呼吸：随鼓点节奏轻微缩放（1.0 ~ 1.08）
+            scale = 1.0 + 0.08 * (0.5 + 0.5 * math.sin(t * 2.0 * math.pi * 2.0)) if sel else 1.0
+            lab = font.render(name, True, color)
+            if scale != 1.0:
+                lab = pygame.transform.smoothscale(
+                    lab, (int(lab.get_width() * scale), int(lab.get_height() * scale)))
+            surf.blit(lab, (cx - lab.get_width() // 2, y - lab.get_height() // 2))
+            # 选中标记：左侧鼓槌小红点（呼吸）
+            if sel:
+                r = 7 + 3 * (0.5 + 0.5 * math.sin(t * 2.0 * math.pi * 2.0))
+                pygame.draw.circle(surf, GOLD, (cx - lab.get_width() // 2 - 26, y), int(r))
+                pygame.draw.circle(surf, RED, (cx - lab.get_width() // 2 - 26, y), int(r), 2)
+
+        # 底部操作提示
+        hint = self.font_s.render("↑↓ 选择     回车 确认     Esc 退出", True, GREY)
+        surf.blit(hint, (cx - hint.get_width() // 2, SCREEN_H - 44))
+
+    # ------------------------------------------------------------------ 按键示意图
+    def draw_keycap(self, surf, label: str, x: int, y: int, scale: float = 1.0,
+                    color=WHITE, pressed: bool = False) -> tuple[int, int]:
+        """绘制一个像素风键帽，返回 (宽, 高)。
+
+        label 为按键名（如 "A"、"空格"、"J"、"Shift"）；pressed 时键帽下沉、变亮。
+        """
+        font = self.font_m
+        # 先算文字尺寸决定键帽大小
+        txt = font.render(label, True, color)
+        pad_x, pad_y = 14, 8
+        w = txt.get_width() + pad_x * 2
+        h = txt.get_height() + pad_y * 2
+        # 像素块尺寸（越大越"像素"）
+        px = 3
+
+        # 立体：底部深色阴影 + 侧面，模拟键帽厚度
+        side = 4 if pressed else 6
+        # 侧面（深色）
+        pygame.draw.rect(surf, (24, 24, 28),
+                         pygame.Rect(x, y + side, w, h))
+        # 顶面（主体）
+        top_col = (70, 70, 78) if not pressed else (96, 96, 106)
+        pygame.draw.rect(surf, top_col, pygame.Rect(x, y, w, h))
+        # 顶面高光（上边缘提亮）
+        pygame.draw.rect(surf, (120, 120, 132), pygame.Rect(x + 3, y + 3, w - 6, 3))
+        # 描边
+        pygame.draw.rect(surf, (12, 12, 14), pygame.Rect(x, y, w, h), 1)
+        # 按键文字（居中）
+        surf.blit(txt, (x + (w - txt.get_width()) // 2,
+                        y + side // 2 + (h - txt.get_height()) // 2))
+        return w, h + side
+
+    def draw_key_row(self, surf, labels: list[str], x: int, y: int, gap: int = 8,
+                     scale: float = 1.0) -> None:
+        """水平排列一串键帽（用于按键示意图）。"""
+        cx = x
+        for lab in labels:
+            w, _ = self.draw_keycap(surf, lab, cx, y, scale)
+            cx += w + gap

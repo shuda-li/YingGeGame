@@ -22,6 +22,23 @@ from .synth import Bank
 from .tempo import MusicDirector
 
 
+MENU_ITEMS = ("开始游戏", "选择角色", "操作说明", "退出游戏")
+
+# 角色列表：后续新增角色只需在此追加一项。
+# 字段：id(唯一) / name(名称) / title(称号) / portrait(立绘素材键，取 characters/player 下某帧)
+#       desc(描述) / locked(是否未解锁)
+CHARACTERS = [
+    {
+        "id": "yingge_shaonian",
+        "name": "英歌少年",
+        "title": "踏鼓 · 初阵",
+        "portrait": "run",         # 立绘：取该状态素材第 0 帧（跑动首帧站立姿）
+        "desc": "潮汕英歌舞的年轻鼓手，以鼓为节、以槌为刃。",
+        "locked": False,
+    },
+]
+
+
 class FeelParam:
     def __init__(self, label: str, getter, setter, step: float, fmt: str = "{:.2f}"):
         self.label = label
@@ -66,13 +83,19 @@ class Game:
         self.elapsed = 0.0
         self.hitstop_t = 0.0
         self.acc = 0.0
-        self.state = "playing"      # playing / dead / cleared
+        self.state = "menu"         # menu / playing / dead / cleared
+        self.menu_index = 0
+        self.menu_t = 0.0
         self.death_t = 0.0
         self.paused = False
         self.show_debug = False
         self.show_feel = False
         self.feel_sel = 0
-        self.show_help = True
+        self.show_help = False
+        self.show_help_menu = False
+        self.show_char_menu = False
+        self.char_index = 0
+        self.selected_char_id = CHARACTERS[0]["id"]
         self.fps = 0.0
         self.poll_hz = 0.0
         self._poll_count = 0
@@ -81,6 +104,7 @@ class Game:
         self.message_t = 0.0
         self.runs = 0
         self.finisher_count = 0
+        self._quit_requested = False
 
         self.feel_params = self._build_feel_params()
         self.log_path = os.path.join(app_dir(), "playtest_log.csv")
@@ -175,8 +199,56 @@ class Game:
         self.elapsed = 0.0
         self.state = "playing"
         self.death_t = 0.0
+        self.menu_index = 0
+        self.menu_t = 0.0
         self.message = "重新出发" if full else "从检查点重开"
         self.message_t = 1.2
+
+    # ------------------------------------------------------------------ 菜单
+    def _handle_menu(self) -> None:
+        """菜单态的输入处理：上下移动选择、回车确认、Esc 退出。"""
+        n = len(MENU_ITEMS)
+        if self._key_edge(pygame.K_UP) or self._key_edge(pygame.K_w):
+            self.menu_index = (self.menu_index - 1) % n
+        if self._key_edge(pygame.K_DOWN) or self._key_edge(pygame.K_s):
+            self.menu_index = (self.menu_index + 1) % n
+        if self._key_edge(pygame.K_RETURN) or self._key_edge(pygame.K_SPACE):
+            self._menu_confirm()
+
+    def _menu_confirm(self) -> None:
+        """确认菜单选择。"""
+        item = MENU_ITEMS[self.menu_index]
+        if item == "开始游戏":
+            self.show_help = False
+            self.show_help_menu = False
+            self.show_char_menu = False
+            self.restart(full=True)
+        elif item == "选择角色":
+            self.show_char_menu = True
+        elif item == "操作说明":
+            self.show_help_menu = True
+        elif item == "退出游戏":
+            self._quit_requested = True
+
+    def _handle_help_menu(self) -> None:
+        """操作说明子界面的输入：Esc 或 回车 返回主菜单。"""
+        if self._key_edge(pygame.K_ESCAPE) or self._key_edge(pygame.K_RETURN):
+            self.show_help_menu = False
+
+    def _handle_char_menu(self) -> None:
+        """角色选择子界面的输入：左右切换、回车确认、Esc 返回。"""
+        n = len(CHARACTERS)
+        if self._key_edge(pygame.K_LEFT) or self._key_edge(pygame.K_a):
+            self.char_index = (self.char_index - 1) % n
+        if self._key_edge(pygame.K_RIGHT) or self._key_edge(pygame.K_d):
+            self.char_index = (self.char_index + 1) % n
+        if self._key_edge(pygame.K_RETURN) or self._key_edge(pygame.K_SPACE):
+            # 确认选择（未解锁角色不可选）
+            if not CHARACTERS[self.char_index]["locked"]:
+                self.selected_char_id = CHARACTERS[self.char_index]["id"]
+                self.show_char_menu = False
+        if self._key_edge(pygame.K_ESCAPE):
+            self.show_char_menu = False
 
     # ------------------------------------------------------------------ 主循环
     def run(self) -> None:
@@ -202,7 +274,18 @@ class Game:
                 running = False
                 break
 
-            if not self.paused:
+            if self.state == "menu":
+                self.menu_t += real_dt
+                if self.show_char_menu:
+                    self._handle_char_menu()
+                elif self.show_help_menu:
+                    self._handle_help_menu()
+                else:
+                    self._handle_menu()
+                if self._quit_requested:
+                    running = False
+                    break
+            elif not self.paused:
                 self._handle_input(frame, t)
                 if self.state == "playing":
                     self.acc += real_dt
@@ -234,7 +317,14 @@ class Game:
     def _global_keys(self, frame) -> bool:
         keys = pygame.key.get_pressed()
         if keys[pygame.K_ESCAPE]:
-            return True
+            # 菜单态 Esc 直接退出；游戏中 Esc 返回主菜单
+            if self.state == "menu":
+                return True
+            if self._key_edge(pygame.K_ESCAPE):
+                self.state = "menu"
+                self.menu_t = 0.0
+                self.paused = False
+            return False
         for e in pygame.event.get(pygame.KEYDOWN):
             pass
         if frame.just_pressed("finisher") and keys[pygame.K_f]:
@@ -396,6 +486,14 @@ class Game:
     # ------------------------------------------------------------------ 渲染
     def _render(self, t: float) -> None:
         s = self.screen
+        if self.state == "menu":
+            if self.show_char_menu:
+                self._render_char_menu(s)
+            elif self.show_help_menu:
+                self._render_help_menu(s)
+            else:
+                self.renderer.draw_menu(s, self.menu_index, list(MENU_ITEMS), self.menu_t)
+            return
         self.renderer.cam.update(self.player, float(DATA.assist["camera_lookahead_ratio"]))
         self.renderer.draw_world(s, self.level, self.player, self.combat)
         self.renderer.draw_hud(s, self.player, self.energy, self.judgement, self.combat,
@@ -423,8 +521,9 @@ class Game:
         if self.show_help:
             self.renderer.draw_help(s, [
                 "A/D 移动  空格 跳跃   J 攻击（合拍）   L 抢步   S+J 矮子步   F 满堂彩",
-                "F1 判定调试面板   F2 手感参数面板   F3 关闭帮助   P 暂停   R 重开",
-                "1/2/3/4 强制板式：慢板 / 中板 / 快板 / 极板",
+                "合拍命中鼓点可获得伤害倍率；鼓劲攒满后按 F 释放「满堂彩」",
+                "F1 判定调试面板   F2 手感参数面板   F3 操作说明   P 暂停   R 重开",
+                "1/2/3/4 强制板式：慢板 / 中板 / 快板 / 极板   Esc 返回主菜单",
             ])
 
         if self.show_feel:
@@ -433,6 +532,146 @@ class Game:
 
         if self.show_debug:
             self.renderer.draw_debug_panel(s, self._debug_lines(t))
+
+    def _render_char_menu(self, s) -> None:
+        """渲染「选择角色」子界面：横向卡片式选角。"""
+        from .hud import GOLD, WHITE, GREY, RED, DIM
+        # 先清屏（避免与前一帧画面叠加）
+        s.fill((8, 8, 10))
+        # 半透明遮罩
+        mask = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        mask.fill((0, 0, 0, 215))
+        s.blit(mask, (0, 0))
+
+        cx = SCREEN_W // 2
+        r = self.renderer
+        title = r.font_l.render("选择角色", True, GOLD)
+        s.blit(title, (cx - title.get_width() // 2, int(SCREEN_H * 0.06)))
+
+        ch = CHARACTERS[self.char_index]
+        locked = ch["locked"]
+
+        # 左右箭头（多角色时显示）
+        n = len(CHARACTERS)
+        if n > 1:
+            la = r.font_xl.render("<", True, GOLD if self.char_index > 0 else DIM)
+            s.blit(la, (cx - 380, int(SCREEN_H * 0.46)))
+            ra = r.font_xl.render(">", True, GOLD if self.char_index < n - 1 else DIM)
+            s.blit(ra, (cx + 340, int(SCREEN_H * 0.46)))
+
+        # 立绘卡片（中间）
+        card_w, card_h = 320, 400
+        card_x, card_y = cx - card_w // 2, int(SCREEN_H * 0.18)
+        pygame.draw.rect(s, (16, 14, 18), pygame.Rect(card_x, card_y, card_w, card_h))
+        border = GOLD if ch["id"] == self.selected_char_id else DIM
+        pygame.draw.rect(s, border, pygame.Rect(card_x, card_y, card_w, card_h), 3)
+
+        # 立绘：用角色素材，居中放大
+        portrait = self.renderer.assets.player(ch["portrait"], 0)
+        if portrait is not None:
+            ph = 320
+            pw = int(portrait.get_width() * ph / max(1, portrait.get_height()))
+            portrait = self.renderer.assets.scaled(portrait, pw, ph)
+            if locked:
+                portrait = self.renderer.assets.tinted(portrait, (20, 20, 20))
+            s.blit(portrait, (cx - pw // 2, card_y + card_h - ph - 14))
+
+        # 选中标记
+        if ch["id"] == self.selected_char_id and not locked:
+            sel = r.font_s.render("● 已选择", True, GOLD)
+            s.blit(sel, (cx - sel.get_width() // 2, card_y - 30))
+
+        # 名称 / 称号 / 描述（卡片下方，紧凑排列）
+        name_col = WHITE if not locked else GREY
+        info_y = card_y + card_h + 22
+        nm = r.font_l.render(ch["name"], True, name_col)
+        s.blit(nm, (cx - nm.get_width() // 2, info_y))
+        tt = r.font_s.render(ch["title"], True, GOLD)
+        s.blit(tt, (cx - tt.get_width() // 2, info_y + 40))
+        desc = r.font_m.render(ch["desc"] if not locked else "（未解锁）", True, GREY)
+        s.blit(desc, (cx - desc.get_width() // 2, info_y + 70))
+
+        # 底部提示
+        if n > 1:
+            hint = r.font_s.render("< > 切换     回车 确认     Esc 返回", True, GREY)
+        else:
+            hint = r.font_s.render("回车 确认     Esc 返回（当前仅一名角色，后续将陆续登场）", True, GREY)
+        s.blit(hint, (cx - hint.get_width() // 2, SCREEN_H - 44))
+
+    def _render_help_menu(self, s) -> None:
+        """渲染「操作说明」子界面：覆盖在主菜单之上，键帽示意图 + 文字说明。"""
+        from .hud import GOLD, WHITE, GREY
+        # 先清屏
+        s.fill((8, 8, 10))
+        # 半透明遮罩
+        mask = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        mask.fill((0, 0, 0, 215))
+        s.blit(mask, (0, 0))
+
+        cx = SCREEN_W // 2
+        r = self.renderer
+        title = r.font_l.render("操作说明", True, GOLD)
+        s.blit(title, (cx - title.get_width() // 2, int(SCREEN_H * 0.05)))
+        slogan = r.font_s.render("鼓点就是节拍器：判定圈收缩到最小的一瞬攻击，即为「完美合拍」", True, GOLD)
+        s.blit(slogan, (cx - slogan.get_width() // 2, int(SCREEN_H * 0.05) + 40))
+
+        # 面板背景（半透明深色卡片）
+        panel = pygame.Surface((960, 500), pygame.SRCALPHA)
+        panel.fill((10, 10, 14, 200))
+        px, py = cx - 480, int(SCREEN_H * 0.15)
+        s.blit(panel, (px, py))
+        pygame.draw.rect(s, GOLD, pygame.Rect(px, py, 960, 500), 2)
+
+        # 两列布局：左列「移动+战斗」，右列「快捷键」
+        col_l = px + 30
+        col_r = px + 500
+
+        def key_line(keys: list[str], desc: str, x: int, y: int) -> None:
+            r.draw_key_row(s, keys, x, y, gap=8)
+            t = r.font_m.render(desc, True, WHITE)
+            s.blit(t, (x + 240, y + 8))
+
+        def section(label: str, x: int, y: int) -> None:
+            t = r.font_m.render(label, True, GOLD)
+            s.blit(t, (x, y))
+
+        # 左列
+        y = py + 24
+        section("【移动与动作】", col_l, y)
+        y += 38
+        key_line(["A", "D"], "左右移动", col_l, y)
+        y += 48
+        key_line(["空格"], "跳跃", col_l, y)
+        y += 48
+        key_line(["L"], "抢步（冲刺）", col_l, y)
+        y += 48
+        key_line(["S", "+", "J"], "矮子步", col_l, y)
+        y += 54
+        section("【战斗与节奏】", col_l, y)
+        y += 38
+        key_line(["J"], "攻击（合拍）", col_l, y)
+        y += 48
+        key_line(["F"], "满堂彩", col_l, y)
+
+        # 右列
+        y = py + 24
+        section("【快捷键】", col_r, y)
+        y += 38
+        key_line(["P"], "暂停", col_r, y)
+        y += 48
+        key_line(["R"], "重开", col_r, y)
+        y += 48
+        key_line(["1", "2", "3", "4"], "切换板式", col_r, y)
+        y += 54
+        section("【调试】", col_r, y)
+        y += 38
+        key_line(["F1"], "判定调试", col_r, y)
+        y += 48
+        key_line(["F2"], "手感参数", col_r, y)
+
+        # 底部返回提示（面板外）
+        t2 = r.font_s.render("按 Esc 或 回车 返回", True, GREY)
+        s.blit(t2, (cx - t2.get_width() // 2, SCREEN_H - 40))
 
     def _debug_lines(self, t: float) -> list[str]:
         st = self.judgement.stats()

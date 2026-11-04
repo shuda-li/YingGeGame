@@ -67,7 +67,7 @@ ENV_FILES = {
     "fore4": "前景层_4.png",
     "ground": "ground_tile.png",
 }
-UI_FILES = {"win": "win.png", "win_alt": "win_alt.png", "lose": "lose.png"}
+UI_FILES = {"win": "win.png", "win_alt": "win_alt.png", "lose": "lose.png", "title": "title.png"}
 
 
 class Assets:
