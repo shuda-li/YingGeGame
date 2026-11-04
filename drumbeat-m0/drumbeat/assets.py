@@ -76,6 +76,7 @@ class Assets:
         self._scaled: dict[tuple, pygame.Surface] = {}
         self._flipped: dict[int, pygame.Surface] = {}
         self._tinted: dict[tuple, pygame.Surface] = {}
+        self._fogged: dict[tuple, pygame.Surface] = {}
         self.loaded = 0
         self.missing = 0
         self._preload()
@@ -157,4 +158,22 @@ class Assets:
             s = surf.copy()
             s.fill(color, special_flags=pygame.BLEND_RGB_ADD)
             self._tinted[key] = s
+        return s
+
+    def fogged(self, surf: pygame.Surface, color, strength: float) -> pygame.Surface:
+        """雾色叠色（大气透视）：按 strength 比例向雾色混合，降低对比度、提亮、偏冷。
+
+        用于远景层营造空间纵深感；strength 0.0 = 原图，1.0 = 纯雾色。
+        按 (表面, 颜色, 强度) 缓存。
+        """
+        strength = max(0.0, min(1.0, strength))
+        key = (id(surf), tuple(color), round(strength, 3))
+        s = self._fogged.get(key)
+        if s is None:
+            s = surf.copy()
+            if strength > 0.0:
+                fog = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+                fog.fill((color[0], color[1], color[2], int(255 * strength)))
+                s.blit(fog, (0, 0))
+            self._fogged[key] = s
         return s

@@ -27,6 +27,11 @@ venv/
 # 原始 AI 素材包（品红底，需处理），与 drumbeat-m0/assets/ 的成品并存，
 # 便于队友重新抠图/分帧；处理规则见 README「美术素材 → 抠图规则」。
 
+# ---------- 素材临时备份与打包 ----------
+art-source/*_backup_*/
+art-source/*.zip
+drumbeat-m0/assets.bak/
+
 # ---------- Trae 内部产物 ----------
 .trae-html-share-packages/
 

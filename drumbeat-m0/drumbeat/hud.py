@@ -26,15 +26,20 @@ GREEN = (60, 160, 90)
 
 GROUND_SCREEN_Y = SCREEN_H * 0.76
 
-# 视差层配置：(素材键, 视差系数, 缩放, 锚点模式, 锚点参数, 平铺间距 px)
+# 视差层配置：(素材键, 视差系数, 缩放, 锚点模式, 锚点参数, 平铺间距 px, 雾强度)
 #   锚点 top  ：参数 = 内容顶部距屏幕顶的比例（0–1）
 #   锚点 ground：参数 = 内容底部相对地面线的偏移（世界单位，正值抬高）
 #   间距 None = 按自身宽度连续平铺
+#   雾强度 0.0 = 不叠雾；>0 表示向雾色混合的比例（大气透视，用于远景层营造纵深）
+#   远景层（far*）默认需雾化；当前 far* 素材未启用，故不加入本列表。
 PARALLAX_LAYERS = [
-    ("cloud1", 0.06, 1.00, "top", 0.06, None),
-    ("mid", 0.55, 1.15, "ground", 0.35, None),
+    ("cloud1", 0.06, 1.00, "top", 0.06, None, 0.0),
+    ("mid", 0.55, 1.15, "ground", 0.35, None, 0.0),
 ]
-FOREGROUND_LAYER = ("fore", 1.35, 0.20, "top", 0.02, 760)
+FOREGROUND_LAYER = ("fore", 1.35, 0.20, "top", 0.02, 760, 0.0)
+
+# 雾色（大气透视）：接近天空底端颜色，远景层叠此色可降低对比度、提亮、偏冷。
+FOG_COLOR = (205, 212, 232)
 
 # 跑动帧播放顺序：run_4/run_5 是 run_0/run_2 腿部镜像得到的对侧腿触地帧，
 # 8 拍实现「右触地 → 过渡 → 左触地 → 过渡」的左右腿交替，每步约 0.9 单位
@@ -101,7 +106,11 @@ class Renderer:
 
     # ------------------------------------------------------------------ 背景
     def _sky_surface(self) -> pygame.Surface:
-        """用天空素材的取色生成整屏竖直渐变（素材本身只有中间一条带）。"""
+        """用天空素材的取色生成整屏竖直渐变（素材本身只有中间一条带）。
+
+        第二层优化：消除天空与背景的割裂。渐变底端不再取素材最底部的粉紫色，
+        而是在中景（mid）顶部之前过渡到中景顶部色，使天空与背景在交接处颜色连续。
+        """
         if self._sky is not None:
             return self._sky
         h = int(GROUND_SCREEN_Y) + 4
@@ -113,15 +122,64 @@ class Renderer:
             return s
         box = base.get_bounding_rect(1)
         top = self._row_color(base, box.top + 3, box)
-        bot = self._row_color(base, box.bottom - 3, box)
+        mid_col = self._row_color(base, box.bottom - 3, box)   # 素材底端色（粉紫/晚霞）
+        horizon = self._horizon_color()                          # 中景顶部最亮色，用于衔接
+        horizon_y = self._mid_top_y()                            # 中景顶部所在 y（割裂发生处）
+        # 渐变：顶部蓝 → 中段晚霞粉紫（延续到 85%）→ 最后 15% 快速过渡到中景顶部色。
+        # 把「粉紫 → 青灰」这段脏中间色压缩到紧贴树冠顶部的很窄一带，
+        # 视觉上变成树冠上方的薄雾，而非横贯天空的灰绿色带。
         for y in range(h):
-            t = y / max(1, h - 1)
-            col = (int(top[0] + (bot[0] - top[0]) * t),
-                   int(top[1] + (bot[1] - top[1]) * t),
-                   int(top[2] + (bot[2] - top[2]) * t))
+            if horizon_y > 0 and y < horizon_y:
+                t = y / max(1, horizon_y)
+                if t < 0.85:
+                    col = self._lerp(top, mid_col, t / 0.85)
+                else:
+                    col = self._lerp(mid_col, horizon, (t - 0.85) / 0.15)
+            else:
+                col = horizon
             pygame.draw.line(s, col, (0, y), (SCREEN_W, y))
         self._sky = s
         return s
+
+    def _mid_top_y(self) -> int:
+        """计算中景（mid）层顶部的屏幕 y 坐标，与 _prep_layer 的 ground 锚点公式一致。"""
+        mid = self.assets.env("mid")
+        if mid is None:
+            return int(GROUND_SCREEN_Y * 0.3)
+        box = mid.get_bounding_rect(1)
+        scale = 1.15
+        param = 0.35
+        tile_h = int(box.height * scale)
+        return int(GROUND_SCREEN_Y - tile_h + param * PIXELS_PER_UNIT)
+
+    def _horizon_color(self) -> tuple[int, int, int]:
+        """取中景（mid）顶部「最亮的一带」颜色，作为天空与背景的衔接色。
+
+        中景顶部通常带一层向天空的透明渐隐（低 alpha 的天光），往下才是树冠、
+        建筑等较暗内容。若直接采第一个高 alpha 行，会采到树冠的暗青灰色，
+        把天空底端染暗、与粉紫晚霞跳变。因此改取顶部区域内平均亮度最高的行，
+        它正是地平线附近明亮的天光色，与天空底端和暖色场景都更协调。
+        """
+        mid = self.assets.env("mid")
+        if mid is None:
+            return (251, 246, 242)   # 默认米白兜底
+        box = mid.get_bounding_rect(1)
+        best = None
+        best_lum = -1
+        limit = min(box.bottom, box.top + 40)
+        for y in range(box.top, max(box.top + 1, limit)):
+            col = self._row_color(mid, y, box)
+            lum = col[0] + col[1] + col[2]
+            if lum > best_lum:
+                best_lum = lum
+                best = col
+        return best if best is not None else (251, 246, 242)
+
+    @staticmethod
+    def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+        return (int(a[0] + (b[0] - a[0]) * t),
+                int(a[1] + (b[1] - a[1]) * t),
+                int(a[2] + (b[2] - a[2]) * t))
 
     @staticmethod
     def _row_color(surf: pygame.Surface, y: int, box: pygame.Rect) -> tuple[int, int, int]:
@@ -135,8 +193,11 @@ class Renderer:
             b += c[2]
         return (r // n, g // n, b // n)
 
-    def _prep_layer(self, key: str, factor: float, scale: float, mode: str, param: float, spacing=None):
-        """裁剪到内容范围并按需缩放，结果缓存（只在首次调用时计算）。"""
+    def _prep_layer(self, key: str, factor: float, scale: float, mode: str, param: float, spacing=None, fog: float = 0.0):
+        """裁剪到内容范围并按需缩放，结果缓存（只在首次调用时计算）。
+
+        第七参 fog 为雾强度：>0 时对贴图叠加雾色（大气透视）。
+        """
         if key in self._layers:
             return self._layers[key]
         rec = None
@@ -151,6 +212,8 @@ class Renderer:
                 crop = src.subsurface(box) if box.width > 0 and box.height > 0 else None
             if crop is not None and box.width > 0 and box.height > 0:
                 tile = self.assets.scaled(crop, int(crop.get_width() * scale), int(crop.get_height() * scale))
+                if fog > 0.0:
+                    tile = self.assets.fogged(tile, FOG_COLOR, fog)
                 if mode == "top":
                     y = int(param * SCREEN_H)
                 else:
